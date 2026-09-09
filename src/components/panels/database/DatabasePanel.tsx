@@ -40,8 +40,6 @@ import LichessOptionsPanel from "./options/LichessOptionsPanel";
 import LocalOptionsPanel from "./options/LocalOptionsPanel";
 import MasterOptionsPanel from "./options/MastersOptionsPanel";
 
-const isWeb = !!import.meta.env.VITE_WEB;
-
 type DBType =
   | { type: "local"; options: LocalOptions }
   | {
@@ -306,8 +304,7 @@ function PanelWithError(props: {
   if (props.missingExplorerToken && props.type !== "local") {
     children = (
       <Alert color="yellow">
-        {t("Board.Database.ExplorerAuthRequired1")}{" "}
-        {isWeb ? "Users" : <Link to="/accounts">Users</Link>}{" "}
+        {t("Board.Database.ExplorerAuthRequired1")} <Link to="/accounts">Users</Link>{" "}
         {t("Board.Database.ExplorerAuthRequired2")}
       </Alert>
     );

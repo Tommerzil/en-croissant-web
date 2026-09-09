@@ -24,6 +24,11 @@ import AccountCards from "../common/AccountCards";
 import GenericCard from "../common/GenericCard";
 import LichessLogo from "./LichessLogo";
 
+// Lichess OAuth login is out of scope for the web build: `commands.authenticate`
+// is not routed on the server. The no-login path (public Lichess API through the
+// allowlisted proxy) and the chess.com import both stay.
+const isWeb = !!import.meta.env.VITE_WEB;
+
 function Accounts() {
   const { t } = useTranslation();
   const [sessions, setSessions] = useAtom(sessionsAtom);
@@ -164,7 +169,7 @@ function AccountModal({
 
   function addAccount() {
     if (website === "lichess") {
-      addLichess(player, username, withLogin);
+      addLichess(player, username, !isWeb && withLogin);
     } else {
       addChessCom(player, username);
     }
@@ -222,7 +227,7 @@ function AccountModal({
             value={username}
             onChange={(e) => setUsername(e.currentTarget.value)}
           />
-          {website === "lichess" && (
+          {!isWeb && website === "lichess" && (
             <Checkbox
               label={t("Home.Accounts.LoginWithBrowser")}
               description={t("Home.Accounts.LoginWithBrowser.Desc")}

@@ -37,8 +37,6 @@ function NavbarLink({ url, icon: Icon, label }: NavbarLinkProps) {
   );
 }
 
-const isWeb = !!import.meta.env.VITE_WEB;
-
 const linksdata = [
   { icon: IconChess, label: "Board", url: "/" },
   { icon: IconUser, label: "User", url: "/accounts" },
@@ -49,7 +47,7 @@ const linksdata = [
     url: "/databases",
   },
   { icon: IconCpu, label: "Engines", url: "/engines" },
-].filter((l) => !(isWeb && l.url === "/accounts"));
+];
 
 export function SideBar() {
   const { t } = useTranslation();
