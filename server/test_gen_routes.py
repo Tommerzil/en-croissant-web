@@ -72,6 +72,13 @@ SAMPLE = textwrap.dedent('''
 ''')
 
 
+ATTR_SAMPLE = g.ATTR + """
+pub fn sample_cmd(%s) -> Result<(), Error> {
+    Ok(())
+}
+"""
+
+
 class GenRoutesTest(unittest.TestCase):
     def setUp(self):
         self.cmds = g.parse_commands(SAMPLE, module="chess")
@@ -127,6 +134,16 @@ class GenRoutesTest(unittest.TestCase):
         by = {c.name: c for c in self.cmds}
         src = g.render_command(by["search_position"])
         self.assertIn("app.touch_tab(&args.tab_id);", src)
+
+    def test_unhandled_path_typed_param_fails_closed(self):
+        src = ATTR_SAMPLE % "x: Option<PathBuf>"
+        with self.assertRaises(SystemExit):
+            g.parse_commands(src, "chess")
+
+    def test_pathy_string_param_must_be_allowlisted(self):
+        src = ATTR_SAMPLE % "db_file: String"
+        with self.assertRaises(SystemExit):
+            g.parse_commands(src, "chess")
 
     def test_router_lists_every_route(self):
         src = g.render_router(self.cmds)

@@ -22,7 +22,7 @@ pub async fn spawn() -> TestServer {
         web_dir,
         sound_dir: data_dir.path().join("sound"),
     };
-    let app = build_app(&config);
+    let app = build_app(&config).expect("build_app");
     let router = build_router(app.clone(), &config);
     let listener = tokio::net::TcpListener::bind(config.bind).await.unwrap();
     let addr: SocketAddr = listener.local_addr().unwrap();

@@ -28,6 +28,11 @@ SPAWN_FNS = {"get_best_moves"}
 SPAWN_GRACE_MS = 300
 # String parameters that carry a filesystem path.
 PATH_STRINGS = {("write_game", "file_path"), ("file_exists", "path"), ("get_file_metadata", "path")}
+# String parameters whose name looks path-like but which are not filesystem paths.
+# Empty today; add (fn, param) entries here (with a reason) if upstream introduces one.
+NON_PATH_STRINGS: set[tuple[str, str]] = set()
+# Names that make a String/&str parameter suspect of being a filesystem path.
+PATHY_NAME_RE = re.compile(r"(^|_)(path|file|dir|db|database|destination)(_|$)")
 # Parameters that carry the client's tab id (drive the idle reaper's last_seen map).
 TAB_PARAMS = {"tab", "tab_id"}
 # Parameters that name an engine binary (must resolve under engines/).
@@ -84,8 +89,15 @@ def classify(fn: str, name: str, ty: str) -> str:
     if (fn, name) in PATH_STRINGS:
         return "path_string"
     if ty == "&str":
-        return "str_ref"
-    return "plain"
+        kind = "str_ref"
+    else:
+        kind = "plain"
+    # Fail closed: never ship an unjailed path out of the generator.
+    if "Path" in ty:
+        raise SystemExit(f"unhandled path-typed param {fn}.{name}: {ty}")
+    if ty in ("String", "&str") and PATHY_NAME_RE.search(name) and (fn, name) not in NON_PATH_STRINGS:
+        raise SystemExit(f"unhandled path-typed param {fn}.{name}: {ty}")
+    return kind
 
 
 def parse_commands(source: str, module: str) -> list[Command]:

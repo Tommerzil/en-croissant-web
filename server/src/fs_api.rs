@@ -1,9 +1,9 @@
-use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, Query, State};
+use axum::body::Body;
+use axum::extract::{DefaultBodyLimit, Query, Request, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
-use axum::{Json, Router};
+use axum::{Json, RequestExt, Router};
 use serde::Deserialize;
 
 use crate::app::{ApiError, App};
@@ -86,18 +86,19 @@ fn content_disposition(name: &str) -> header::HeaderValue {
     header::HeaderValue::from_str(&v).unwrap_or_else(|_| header::HeaderValue::from_static("attachment"))
 }
 
-fn file_response(path: &std::path::Path, attachment: bool) -> Result<Response, ApiError> {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
+async fn file_response(path: &std::path::Path, attachment: bool) -> Result<Response, ApiError> {
+    let file = match tokio::fs::File::open(path).await {
+        Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok((StatusCode::NOT_FOUND, "not found").into_response())
         }
         Err(e) => return Err(e.into()),
     };
     let mime = mime_guess::from_path(path).first_or_octet_stream();
+    let stream = tokio_util::io::ReaderStream::new(file);
     let mut resp = (
         [(header::CONTENT_TYPE, mime.essence_str().to_string())],
-        bytes,
+        Body::from_stream(stream),
     )
         .into_response();
     if attachment {
@@ -109,25 +110,32 @@ fn file_response(path: &std::path::Path, attachment: bool) -> Result<Response, A
 }
 
 async fn read(State(app): State<App>, Query(q): Query<PathQuery>) -> Result<Response, ApiError> {
-    file_response(&resolve(&app.ctx.data_dir, &q.path)?, false)
+    file_response(&resolve(&app.ctx.data_dir, &q.path)?, false).await
 }
 
 async fn download(State(app): State<App>, Query(q): Query<PathQuery>) -> Result<Response, ApiError> {
-    file_response(&resolve(&app.ctx.data_dir, &q.path)?, true)
+    file_response(&resolve(&app.ctx.data_dir, &q.path)?, true).await
 }
 
-async fn write(State(app): State<App>, Query(q): Query<WriteQuery>, body: Bytes) -> Result<StatusCode, ApiError> {
-    use std::io::Write;
+async fn write(State(app): State<App>, Query(q): Query<WriteQuery>, req: Request) -> Result<StatusCode, ApiError> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
     let p = resolve(&app.ctx.data_dir, &q.path)?;
     if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent)?;
+        tokio::fs::create_dir_all(parent).await?;
     }
-    if q.append == Some(1) {
-        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&p)?;
-        f.write_all(&body)?;
+    let mut f = if q.append == Some(1) {
+        tokio::fs::OpenOptions::new().create(true).append(true).open(&p).await?
     } else {
-        std::fs::write(&p, &body)?;
+        tokio::fs::File::create(&p).await?
+    };
+    // `Body` as an extractor ignores DefaultBodyLimit; into_limited_body() re-applies it.
+    let mut stream = req.into_limited_body().into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| ApiError(e.to_string()))?;
+        f.write_all(&chunk).await?;
     }
+    f.flush().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

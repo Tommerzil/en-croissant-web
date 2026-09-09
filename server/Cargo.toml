@@ -29,6 +29,7 @@ log = "0.4"
 env_logger = "0.11"
 bytes = "1"
 mime_guess = "2"
+tokio-util = { version = "0.7", features = ["io"] }
 # Pinned: en-croissant's hand-written `impl Type for Error` compiles against this rc; newer rcs break it.
 specta = "=2.0.0-rc.22"
 

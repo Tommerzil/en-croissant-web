@@ -52,13 +52,20 @@ impl Config {
     }
 }
 
-pub fn build_app(config: &Config) -> App {
-    std::fs::create_dir_all(config.data_dir.join("db")).expect("create data dir");
-    std::fs::create_dir_all(config.data_dir.join("engines")).expect("create engines dir");
+pub fn build_app(config: &Config) -> Result<App, String> {
+    for sub in ["db", "engines"] {
+        let dir = config.data_dir.join(sub);
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            format!(
+                "cannot create {}: {e} \u{2014} is the volume owned by the container uid?",
+                dir.display()
+            )
+        })?;
+    }
     let (ctx, _rx) = ServerCtx::new(Arc::new(AppState::default()), config.data_dir.clone());
     let app = App::new(ctx);
     engines::spawn_reaper(app.clone(), engines::IDLE_LIMIT, Duration::from_secs(30));
-    app
+    Ok(app)
 }
 
 pub fn build_router(app: App, config: &Config) -> Router {

@@ -10,7 +10,13 @@ async fn main() {
             std::process::exit(2);
         }
     };
-    let app = build_app(&config);
+    let app = match build_app(&config) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }
+    };
     let router = build_router(app, &config);
     let listener = tokio::net::TcpListener::bind(config.bind)
         .await

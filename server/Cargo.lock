@@ -445,6 +445,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.24.0",
+ "tokio-util",
  "tower-http",
 ]
 
