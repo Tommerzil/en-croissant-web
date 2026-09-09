@@ -1,7 +1,9 @@
-node_modules
-dist
-dist-web
-src-tauri/target
-server/target
-.git
-*.AppImage
+# Match at any depth: a bare `node_modules` is anchored to the context root, so
+# `web/node_modules/**` would still be sent and bust the `COPY . .` layer cache
+# after any dev-server run.
+**/node_modules
+**/dist
+**/dist-web
+**/target
+**/.git
+**/*.AppImage

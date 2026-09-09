@@ -3,7 +3,9 @@
 # ---- stage 1: web bundle -------------------------------------------------
 FROM node:22-bookworm-slim AS web
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@12 --activate
+# Pinned exactly: a floating major would pick up a future pnpm whose config-key renames
+# break this image with no change in this repo.
+RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
 # pnpm-workspace.yaml carries the build-script approvals; without it here the
 # install aborts with ERR_PNPM_IGNORED_BUILDS before `COPY . .` ever runs.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
