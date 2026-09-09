@@ -121,21 +121,58 @@ async fn write(State(app): State<App>, Query(q): Query<WriteQuery>, req: Request
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
     let p = resolve(&app.ctx.data_dir, &q.path)?;
-    if let Some(parent) = p.parent() {
-        tokio::fs::create_dir_all(parent).await?;
+    // Guard before taking `.parent()`: `path=/` resolves to the data dir itself, whose parent is
+    // outside the jail -- staging there would create the temporary file outside the data dir.
+    if p == app.ctx.data_dir {
+        return Err(ApiError("refusing to write data root".into()));
     }
-    let mut f = if q.append == Some(1) {
-        tokio::fs::OpenOptions::new().create(true).append(true).open(&p).await?
-    } else {
-        tokio::fs::File::create(&p).await?
-    };
+    let parent = p.parent().ok_or_else(|| ApiError("path has no parent directory".into()))?;
+    tokio::fs::create_dir_all(parent).await?;
+
     // `Body` as an extractor ignores DefaultBodyLimit; into_limited_body() re-applies it.
     let mut stream = req.into_limited_body().into_data_stream();
+
+    if q.append == Some(1) {
+        // Appends (the month-by-month chess.com import) deliberately write straight to the real
+        // file rather than staging: staging would mean copying the whole existing file first, and
+        // a failed append can only ever leave a partial tail -- it can never destroy what was
+        // already there, and the importer tolerates re-appending a month.
+        let mut f = tokio::fs::OpenOptions::new().create(true).append(true).open(&p).await?;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| ApiError(e.to_string()))?;
+            f.write_all(&chunk).await?;
+        }
+        f.flush().await?;
+        return Ok(StatusCode::NO_CONTENT);
+    }
+
+    // Full writes are staged into a temporary file beside the destination and renamed over it only
+    // once the whole body has arrived and been flushed. Without this, hitting the 512 MiB body
+    // limit (or the reverse proxy's own limit, or a dropped connection) left a truncated database
+    // or PGN at the real path. `NamedTempFile` removes the staged file on drop, which also covers
+    // the case where axum drops this future because the client went away -- no `?` after that
+    // point would ever run. The dot prefix keeps the partial upload out of `list` output.
+    let staged = tempfile::Builder::new()
+        .prefix(".upload-")
+        .tempfile_in(parent)
+        .map_err(|e| ApiError(format!("could not stage upload: {e}")))?;
+    // `NamedTempFile` creates 0600; the destination used to be created by `File::create` (0666
+    // masked by the umask), so restore that or every uploaded database becomes owner-only.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        staged.as_file().set_permissions(std::fs::Permissions::from_mode(0o644))?;
+    }
+    let mut f = tokio::fs::File::from_std(staged.as_file().try_clone()?);
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| ApiError(e.to_string()))?;
         f.write_all(&chunk).await?;
     }
     f.flush().await?;
+    drop(f);
+    staged
+        .persist(&p)
+        .map_err(|e| ApiError(format!("could not finalise upload: {}", e.error)))?;
     Ok(StatusCode::NO_CONTENT)
 }
 

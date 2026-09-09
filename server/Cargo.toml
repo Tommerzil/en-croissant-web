@@ -30,9 +30,10 @@ env_logger = "0.11"
 bytes = "1"
 mime_guess = "2"
 tokio-util = { version = "0.7", features = ["io"] }
+# Not just a test helper: `/api/fs/write` stages uploads through a NamedTempFile.
+tempfile = "3"
 # Pinned: en-croissant's hand-written `impl Type for Error` compiles against this rc; newer rcs break it.
 specta = "=2.0.0-rc.22"
 
 [dev-dependencies]
-tempfile = "3"
 tokio-tungstenite = "0.24"

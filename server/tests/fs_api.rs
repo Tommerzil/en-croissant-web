@@ -126,3 +126,43 @@ async fn binary_upload_round_trips_byte_for_byte() {
     assert_eq!(r.status(), 200);
     assert_eq!(r.bytes().await.unwrap().to_vec(), bytes);
 }
+
+/// A write that fails part-way must leave the destination exactly as it was.
+///
+/// Before uploads were staged, the handler truncated the real path up front and streamed into it,
+/// so blowing the 512 MiB route limit (or the reverse proxy's smaller one, or a dropped
+/// connection) left a partial file where a chess database or PGN import used to be.
+#[tokio::test]
+async fn over_limit_write_leaves_destination_untouched() {
+    let s = common::spawn().await;
+    let c = Client::new();
+    let u = |p: &str| format!("{}{p}", s.base_url);
+
+    let original = "1. e4 e5 2. Nf3 *";
+    let r = c.put(u("/api/fs/write?path=/documents/y/game.pgn")).body(original).send().await.unwrap();
+    assert_eq!(r.status(), 204);
+
+    // 512 MiB of chunks (the route limit) plus one trailing byte, so the server rejects with
+    // essentially nothing left unsent -- that keeps the response readable instead of racing a RST.
+    let chunk = bytes::Bytes::from(vec![b'x'; 1024 * 1024]);
+    let mut chunks: Vec<bytes::Bytes> = vec![chunk; 512];
+    chunks.push(bytes::Bytes::from_static(b"x"));
+    let stream = futures_util::stream::iter(chunks.into_iter().map(Ok::<_, std::io::Error>));
+    let r = c
+        .put(u("/api/fs/write?path=/documents/y/game.pgn"))
+        .body(reqwest::Body::wrap_stream(stream))
+        .send()
+        .await
+        .expect("server must answer rather than reset the connection");
+    assert!(!r.status().is_success(), "over-limit upload must fail, got {}", r.status());
+
+    let r = c.get(u("/api/fs/read?path=/documents/y/game.pgn")).send().await.unwrap();
+    assert_eq!(r.text().await.unwrap(), original, "destination must be untouched");
+
+    let dir = s.data_dir.path().join("documents/y");
+    let names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, vec!["game.pgn".to_string()], "no staged temporary file may survive");
+}
