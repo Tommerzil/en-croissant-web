@@ -58,3 +58,7 @@ For contributing to this project please refer to the [Contributing guide](./CONT
 ## License
 
 This software is licensed under GPL-3.0 License.
+
+## Web / server port (branch `web`)
+
+This fork adds a headless `server/` crate and a browser build under `web/` so En Croissant can run as a self-hosted HTTP service. See `server/README.md` and `deploy/README.md`. The desktop app is unchanged.
