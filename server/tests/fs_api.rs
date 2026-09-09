@@ -97,3 +97,32 @@ async fn download_filename_with_quote_and_newline_does_not_panic() {
     assert!(!cd.contains('\n'));
     assert!(cd.contains("filename*=UTF-8''a%22b%0Ac.pgn"), "got {cd}");
 }
+
+#[tokio::test]
+async fn binary_upload_round_trips_byte_for_byte() {
+    // The picker's "Upload…" control PUTs raw file bytes here; the write path
+    // streams the body to disk, so nothing may assume UTF-8 or line endings.
+    let s = common::spawn().await;
+    let c = Client::new();
+    let u = |p: &str| format!("{}{p}", s.base_url);
+
+    // A NUL, a lone 0xFF (invalid UTF-8), a multi-byte UTF-8 sequence (é), CRLF.
+    let bytes: Vec<u8> = vec![0x00, 0xFF, 0xC3, 0xA9, 0x0D, 0x0A, 0x1B, 0x7F, 0x80, 0x41];
+
+    let r = c
+        .put(u("/api/fs/write?path=/documents/up.pgn"))
+        .header("content-type", "application/octet-stream")
+        .body(bytes.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 204);
+
+    let st: serde_json::Value =
+        c.get(u("/api/fs/stat?path=/documents/up.pgn")).send().await.unwrap().json().await.unwrap();
+    assert_eq!(st["size"], bytes.len());
+
+    let r = c.get(u("/api/fs/read?path=/documents/up.pgn")).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.bytes().await.unwrap().to_vec(), bytes);
+}

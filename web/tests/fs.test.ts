@@ -6,6 +6,7 @@ import {
     readDir,
     readTextFile,
     remove,
+    writeFile,
     writeTextFile,
 } from "../shims/tauri-fs";
 
@@ -40,6 +41,16 @@ describe("fs shim", () => {
         expect((f.mock.calls[1] as any)[0]).toBe(
             "/api/fs/write?path=%2Fdocuments%2Fa.pgn&append=1",
         );
+    });
+    it("writeFile PUTs the exact bytes as octet-stream (the picker's upload path)", async () => {
+        const f = stub(() => new Response(null, { status: 204 }));
+        const bytes = new Uint8Array([0x5b, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x00, 0xff, 0x0a]);
+        await writeFile("/documents/x.pgn", bytes);
+        const [url, init] = f.mock.calls[0] as any;
+        expect(url).toBe("/api/fs/write?path=%2Fdocuments%2Fx.pgn");
+        expect(init.method).toBe("PUT");
+        expect(init.headers["content-type"]).toBe("application/octet-stream");
+        expect(Array.from(init.body as Uint8Array)).toEqual(Array.from(bytes));
     });
     it("exists uses stat", async () => {
         stub(
