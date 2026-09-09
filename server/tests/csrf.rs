@@ -47,3 +47,31 @@ async fn the_guard_covers_the_whole_router() {
         .unwrap();
     assert_eq!(r.status(), 403);
 }
+
+#[tokio::test]
+async fn cross_site_navigations_still_reach_the_app() {
+    // Clicking a link to the app from a chat message or the Tailscale console is
+    // a cross-site request; the user must get the app, not a JSON error.
+    let s = common::spawn().await;
+    let c = Client::new();
+    let nav = |r: reqwest::RequestBuilder| {
+        r.header("sec-fetch-site", "cross-site")
+            .header("sec-fetch-mode", "navigate")
+            .header("sec-fetch-dest", "document")
+    };
+
+    let r = nav(c.get(format!("{}/", s.base_url))).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert!(r.text().await.unwrap().contains("<title>test</title>"));
+
+    // But a cross-site form post is mode `navigate` too, and is exactly the hole
+    // this guard closes.
+    let r = nav(c.post(format!("{}/api/kv/x", s.base_url)))
+        .header("content-type", "text/plain")
+        .body("pwned")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 403);
+    assert!(kv_all(&s).await.get("x").is_none());
+}

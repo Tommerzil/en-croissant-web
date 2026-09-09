@@ -17,6 +17,16 @@
 //! defence in depth for a service whose only real network control is the
 //! tailnet, not an authentication scheme.
 //!
+//! One exemption, from the standard fetch-metadata resource isolation policy: a
+//! top-level navigation. Clicking a link to the app from any other site — a
+//! chat message, a mail, the Tailscale admin console — is a cross-site request,
+//! and without the carve-out the user would get a JSON error instead of the app.
+//! It is narrowed to GET/HEAD, because a cross-site
+//! `<form method=post action=/api/kv/x>` submission is *also* mode `navigate`
+//! and is exactly the hole this guard closes; and `object`/`embed` destinations
+//! are excluded, being the only navigate-mode fetches whose response the
+//! embedding page can pull into its own document.
+//!
 //! Two known limits, both deliberate. Browsers only send fetch-metadata headers
 //! to potentially-trustworthy origins, so a plain-HTTP request straight to the
 //! tailnet IP carries no header and is waved through; the guard bites when the
@@ -25,17 +35,30 @@
 //! covered — that is the same trust boundary as the tailnet itself.
 
 use axum::extract::Request;
-use axum::http::StatusCode;
+use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
+fn header_is(req: &Request, name: &str, value: &[u8]) -> bool {
+    req.headers().get(name).is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(value))
+}
+
+/// A top-level navigation that cannot hand its response back to the initiator.
+fn is_safe_navigation(req: &Request) -> bool {
+    if !header_is(req, "sec-fetch-mode", b"navigate") {
+        return false;
+    }
+    if req.method() != Method::GET && req.method() != Method::HEAD {
+        return false;
+    }
+    !header_is(req, "sec-fetch-dest", b"object") && !header_is(req, "sec-fetch-dest", b"embed")
+}
+
 pub async fn reject_cross_site(req: Request, next: Next) -> Response {
-    if let Some(site) = req.headers().get("sec-fetch-site") {
-        if site.as_bytes().eq_ignore_ascii_case(b"cross-site") {
-            // A JSON string body, like the rest of the API's errors.
-            return (StatusCode::FORBIDDEN, Json("cross-site request rejected")).into_response();
-        }
+    if header_is(&req, "sec-fetch-site", b"cross-site") && !is_safe_navigation(&req) {
+        // A JSON string body, like the rest of the API's errors.
+        return (StatusCode::FORBIDDEN, Json("cross-site request rejected")).into_response();
     }
     next.run(req).await
 }
