@@ -1,0 +1,26 @@
+{$CHESS_DOMAIN} {
+        bind {$CHESS_TAILNET_IP}
+        tls {
+                dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+        }
+        header {
+                Strict-Transport-Security "max-age=31536000; includeSubDomains"
+                # The app's cross-site guard deliberately allows framing GETs; deny it here.
+                X-Frame-Options "DENY"
+                Content-Security-Policy "frame-ancestors 'none'"
+                -Server
+                -X-Powered-By
+        }
+        # The server emits no Cache-Control. Hashed assets are immutable; everything
+        # else (index.html above all) must be revalidated or a redeploy leaves a stale
+        # index pointing at deleted asset filenames. The two matchers must not overlap:
+        # with `header /*` the later directive wins and /assets/* would lose `immutable`.
+        @assets path /assets/*
+        @notassets not path /assets/*
+        header @assets Cache-Control "public, max-age=31536000, immutable"
+        header @notassets Cache-Control "no-cache"
+        request_body {
+                max_size 128MB
+        }
+        reverse_proxy 127.0.0.1:8090
+}

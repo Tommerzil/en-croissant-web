@@ -1,0 +1,42 @@
+name: chess
+
+services:
+  chess:
+    build:
+      context: ./src
+      dockerfile: deploy/Dockerfile
+      args:
+        APP_UID: ${CHESS_UID:-1000}
+        APP_GID: ${CHESS_GID:-1000}
+    image: chess-server:${CHESS_TAG:-latest}
+    container_name: chess
+    restart: unless-stopped
+    user: "${CHESS_UID:-1000}:${CHESS_GID:-1000}"
+    ports:
+      - "127.0.0.1:8090:8090"
+    # Both must be bind mounts. A named volume is created root-owned, and the
+    # entrypoint seeds /data/engines/stockfish as the unprivileged app uid.
+    volumes:
+      - ./data:/data
+      - ./engines:/data/engines
+    environment:
+      RUST_LOG: info
+    # Engine UCI option strings (SyzygyPath, EvalFile, Debug Log File) are client-supplied and
+    # unjailed by design for v1, so the engine may read and write arbitrary paths as this uid.
+    # A read-only root filesystem confines writes to /data and a scratch tmpfs.
+    read_only: true
+    # Sized: tmpfs pages count against the memory limit below, and the server writes
+    # temporary files here during PGN conversion.
+    tmpfs:
+      - /tmp:size=1g
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+          cpus: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
