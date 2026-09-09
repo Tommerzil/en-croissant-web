@@ -9,6 +9,24 @@ fn allowlist() {
     assert!(!is_allowed("https://evil.example/api.chess.com"));
     assert!(!is_allowed("http://api.chess.com/insecure"));
     assert!(!is_allowed("file:///etc/passwd"));
+    // Non-default port is rejected.
+    assert!(!is_allowed("https://api.chess.com:8443/x"));
+    // Userinfo trick: the real host is evil.example.
+    assert!(!is_allowed("https://api.chess.com@evil.example/"));
+    // Url lowercases the host, so this normalises to an allowed host.
+    assert_eq!(
+        reqwest::Url::parse("https://API.CHESS.COM/x").unwrap().host_str(),
+        Some("api.chess.com")
+    );
+    assert!(is_allowed("https://API.CHESS.COM/x"));
+}
+
+#[test]
+fn client_is_shared() {
+    use chess_server::proxy::client;
+    let a = client() as *const reqwest::Client;
+    let b = client() as *const reqwest::Client;
+    assert_eq!(a, b);
 }
 
 #[tokio::test]
