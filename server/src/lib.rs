@@ -3,6 +3,7 @@ pub mod engines;
 pub mod fs_api;
 pub mod kv;
 pub mod paths;
+pub mod proxy;
 pub mod routes_extra;
 pub mod routes_gen;
 pub mod static_files;
@@ -67,6 +68,7 @@ pub fn build_router(app: App, config: &Config) -> Router {
         .merge(routes_extra::router())
         .merge(routes_gen::router())
         .merge(ws::router())
+        .merge(proxy::router())
         .merge(static_files::router(&config.web_dir, &config.sound_dir))
         .with_state(app)
 }
