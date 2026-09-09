@@ -33,7 +33,7 @@ async fn analyze_game(State(app): State<App>, Json(mut args): Json<AnalyzeGameAr
         args.go_mode,
         args.options,
         args.uci_options,
-        &*app.ctx.state,
+        &app.ctx.state,
         app.ctx.clone(),
     )
     .await?;
