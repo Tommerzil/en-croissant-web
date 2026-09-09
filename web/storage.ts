@@ -68,7 +68,11 @@ class ServerStorage implements Storage {
             const res =
                 value === null
                     ? await fetch(url, { method: "DELETE" })
-                    : await fetch(url, { method: "PUT", body: value, headers: { "content-type": "text/plain" } });
+                    : await fetch(url, {
+                          method: "PUT",
+                          body: value,
+                          headers: { "content-type": "text/plain" },
+                      });
             if (!res.ok) throw new Error(`settings write failed: ${res.status}`);
         } catch (e) {
             console.warn("settings write failed, will retry on next change", key, e);
@@ -76,7 +80,8 @@ class ServerStorage implements Storage {
             // have been queued (or already stored) while this request was in flight;
             // re-queueing then would push stale data over it.
             const superseded =
-                this.pending.has(key) || (value === null ? this.cache.has(key) : this.cache.get(key) !== value);
+                this.pending.has(key) ||
+                (value === null ? this.cache.has(key) : this.cache.get(key) !== value);
             if (!superseded) this.pending.set(key, value);
         }
     }
@@ -123,7 +128,11 @@ export function seedDefaults(defaults: Record<string, string>): void {
  */
 export function installGlobalStorage(): void {
     for (const name of ["localStorage", "sessionStorage"] as const) {
-        Object.defineProperty(window, name, { value: serverStorage, configurable: true, writable: false });
+        Object.defineProperty(window, name, {
+            value: serverStorage,
+            configurable: true,
+            writable: false,
+        });
         if ((window as any)[name] !== serverStorage) {
             throw new Error(`browser refused to override window.${name}`);
         }

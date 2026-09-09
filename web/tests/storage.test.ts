@@ -7,13 +7,22 @@ describe("serverStorage", () => {
         vi.resetModules();
         vi.useFakeTimers();
         calls = [];
-        vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-            calls.push({ url: String(url), method: init?.method ?? "GET", body: init?.body as string | undefined });
-            if (String(url) === "/api/kv" && !init?.method) {
-                return new Response(JSON.stringify({ "piece-set": "\"alpha\"" }), { status: 200 });
-            }
-            return new Response(null, { status: 204 });
-        }));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async (url: string, init?: RequestInit) => {
+                calls.push({
+                    url: String(url),
+                    method: init?.method ?? "GET",
+                    body: init?.body as string | undefined,
+                });
+                if (String(url) === "/api/kv" && !init?.method) {
+                    return new Response(JSON.stringify({ "piece-set": '"alpha"' }), {
+                        status: 200,
+                    });
+                }
+                return new Response(null, { status: 204 });
+            }),
+        );
         vi.stubGlobal("navigator", { sendBeacon: vi.fn(() => true) });
     });
 
@@ -25,7 +34,7 @@ describe("serverStorage", () => {
     it("preloads keys and reads synchronously", async () => {
         const { preloadStorage, serverStorage } = await import("../storage");
         await preloadStorage();
-        expect(serverStorage.getItem("piece-set")).toBe("\"alpha\"");
+        expect(serverStorage.getItem("piece-set")).toBe('"alpha"');
         expect(serverStorage.getItem("missing")).toBeNull();
         expect(serverStorage.length).toBe(1);
     });
@@ -50,14 +59,16 @@ describe("serverStorage", () => {
         serverStorage.removeItem("piece-set");
         expect(serverStorage.getItem("piece-set")).toBeNull();
         await vi.advanceTimersByTimeAsync(350);
-        expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/kv/piece-set")).toBe(true);
+        expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/kv/piece-set")).toBe(
+            true,
+        );
     });
 
     it("seedDefaults only fills absent keys", async () => {
         const { preloadStorage, seedDefaults, serverStorage } = await import("../storage");
         await preloadStorage();
-        seedDefaults({ "piece-set": "\"beta\"", "native-bar": "true" });
-        expect(serverStorage.getItem("piece-set")).toBe("\"alpha\"");
+        seedDefaults({ "piece-set": '"beta"', "native-bar": "true" });
+        expect(serverStorage.getItem("piece-set")).toBe('"alpha"');
         expect(serverStorage.getItem("native-bar")).toBe("true");
     });
 
@@ -83,7 +94,10 @@ describe("serverStorage", () => {
         const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
         const { preloadStorage, serverStorage, flushNow } = await import("../storage");
         await preloadStorage();
-        vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 500 })));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => new Response(null, { status: 500 })),
+        );
         serverStorage.setItem("y", "1");
         await vi.advanceTimersByTimeAsync(350);
         expect(warn).toHaveBeenCalled();
@@ -190,7 +204,12 @@ describe("serverStorage", () => {
 describe("jotai/utils shim", () => {
     it("atomWithStorage reads from serverStorage synchronously", async () => {
         vi.resetModules();
-        vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ "font-size": "120" }), { status: 200 })));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(
+                async () => new Response(JSON.stringify({ "font-size": "120" }), { status: 200 }),
+            ),
+        );
         const { preloadStorage } = await import("../storage");
         await preloadStorage();
         const { atomWithStorage } = await import("../shims/jotai-utils");
