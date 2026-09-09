@@ -1,4 +1,5 @@
 pub mod app;
+pub mod csrf;
 pub mod engines;
 pub mod fs_api;
 pub mod kv;
@@ -77,5 +78,8 @@ pub fn build_router(app: App, config: &Config) -> Router {
         .merge(ws::router())
         .merge(proxy::router())
         .merge(static_files::router(&config.web_dir, &config.sound_dir))
+        // After every merge so it also covers the SPA fallback: the guard is
+        // router-wide on purpose, so a route added later is covered too.
+        .layer(axum::middleware::from_fn(csrf::reject_cross_site))
         .with_state(app)
 }
