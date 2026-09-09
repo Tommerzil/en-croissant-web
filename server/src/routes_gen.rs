@@ -376,6 +376,7 @@ pub struct SearchPositionArgs {
 }
 
 pub async fn search_position(State(app): State<App>, Json(args): Json<SearchPositionArgs>) -> ApiResult {
+    app.touch_tab(&args.tab_id);
     let out = en_croissant::db::search_position(resolve(&app.ctx.data_dir, &args.file)?, args.query, app.ctx.clone(), args.tab_id, &*app.ctx.state).await?;
     Ok(Json(serde_json::to_value(out)?))
 }

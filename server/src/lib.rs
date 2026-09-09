@@ -11,6 +11,7 @@ pub mod ws;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use en_croissant::ctx::ServerCtx;
@@ -54,7 +55,9 @@ pub fn build_app(config: &Config) -> App {
     std::fs::create_dir_all(config.data_dir.join("db")).expect("create data dir");
     std::fs::create_dir_all(config.data_dir.join("engines")).expect("create engines dir");
     let (ctx, _rx) = ServerCtx::new(Arc::new(AppState::default()), config.data_dir.clone());
-    App::new(ctx)
+    let app = App::new(ctx);
+    engines::spawn_reaper(app.clone(), engines::IDLE_LIMIT, Duration::from_secs(30));
+    app
 }
 
 pub fn build_router(app: App, config: &Config) -> Router {

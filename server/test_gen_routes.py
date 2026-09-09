@@ -46,6 +46,18 @@ SAMPLE = textwrap.dedent('''
 
     #[cfg_attr(feature = "tauri", tauri::command)]
     #[cfg_attr(feature = "tauri", specta::specta)]
+    pub async fn search_position(
+        file: PathBuf,
+        query: GameQuery,
+        app: AppCtx,
+        tab_id: String,
+        state: AppStateRef<'_>,
+    ) -> Result<(Vec<PositionStats>, Vec<NormalizedGame>), Error> {
+        todo!()
+    }
+
+    #[cfg_attr(feature = "tauri", tauri::command)]
+    #[cfg_attr(feature = "tauri", specta::specta)]
     pub async fn analyze_game(
         id: String,
         engine: String,
@@ -69,7 +81,7 @@ class GenRoutesTest(unittest.TestCase):
 
     def test_finds_all_commands(self):
         # analyze_game is in SKIP_FNS (hand-written handler: its options carry a nested path).
-        self.assertEqual(self.names(), ["get_best_moves", "clear_games", "get_opening_from_fen", "convert_pgn"])
+        self.assertEqual(self.names(), ["get_best_moves", "clear_games", "get_opening_from_fen", "convert_pgn", "search_position"])
 
     def test_async_and_result_detection(self):
         by = {c.name: c for c in self.cmds}
@@ -109,6 +121,12 @@ class GenRoutesTest(unittest.TestCase):
 
         src = g.render_command(by["get_opening_from_fen"])
         self.assertIn("&args.fen", src)
+
+    def test_tab_id_param_also_touches_the_tab(self):
+        # search_position names its tab parameter `tab_id`; it must still feed last_seen.
+        by = {c.name: c for c in self.cmds}
+        src = g.render_command(by["search_position"])
+        self.assertIn("app.touch_tab(&args.tab_id);", src)
 
     def test_router_lists_every_route(self):
         src = g.render_router(self.cmds)

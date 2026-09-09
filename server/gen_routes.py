@@ -28,6 +28,8 @@ SPAWN_FNS = {"get_best_moves"}
 SPAWN_GRACE_MS = 300
 # String parameters that carry a filesystem path.
 PATH_STRINGS = {("write_game", "file_path"), ("file_exists", "path"), ("get_file_metadata", "path")}
+# Parameters that carry the client's tab id (drive the idle reaper's last_seen map).
+TAB_PARAMS = {"tab", "tab_id"}
 # Parameters that name an engine binary (must resolve under engines/).
 ENGINE_PARAMS = {("get_best_moves", "engine"), ("analyze_game", "engine"), ("get_engine_config", "path")}
 
@@ -157,7 +159,7 @@ def render_command(c: Command) -> str:
     if not json_params:
         lines.append("    let _ = &args;")
     for p in json_params:
-        if p.name == "tab":
+        if p.name in TAB_PARAMS:
             lines.append(f"    app.touch_tab(&args.{p.name});")
     call = f"en_croissant::{c.module}::{c.name}({', '.join(call_arg(p) for p in c.params)})"
     if c.name in SPAWN_FNS:
