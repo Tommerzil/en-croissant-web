@@ -74,6 +74,28 @@ describe("event shim", () => {
         expect(FakeSocket.instances).toHaveLength(2);
     });
 
+    it("ignores close events from a superseded socket", async () => {
+        const { listen } = await import("../shims/tauri-event");
+        const cb = vi.fn();
+        await listen("x", cb);
+        // Server-initiated close: the socket sits in CLOSING while JS keeps running,
+        // so the next listen() passes the `readyState <= 1` guard and opens a new one.
+        FakeSocket.instances[0].readyState = 2;
+        await listen("y", () => {});
+        expect(FakeSocket.instances).toHaveLength(2);
+        expect(FakeSocket.instances[1]).not.toBe(FakeSocket.instances[0]);
+
+        FakeSocket.instances[0].onclose?.();
+        // Well past the 10s backoff ceiling: no reconnect may be scheduled at any value.
+        await vi.advanceTimersByTimeAsync(11_000);
+        expect(FakeSocket.instances).toHaveLength(2);
+
+        // The live socket is still instance 1 and still delivers frames.
+        FakeSocket.instances[1].open();
+        FakeSocket.instances[1].push({ event: "x", id: 1, payload: 1 });
+        expect(cb).toHaveBeenCalledTimes(1);
+    });
+
     it("local emit reaches local listeners", async () => {
         const { listen, emit } = await import("../shims/tauri-event");
         const cb = vi.fn();

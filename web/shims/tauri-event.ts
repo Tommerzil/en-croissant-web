@@ -41,6 +41,8 @@ function connect() {
     const ws = new WebSocket(`${proto}//${location.host}/ws/events`);
     socket = ws;
     ws.onopen = () => {
+        // Only the current socket may touch shared state (see onclose).
+        if (socket !== ws) return;
         backoffMs = 500;
     };
     ws.onmessage = (e) => {
@@ -51,6 +53,11 @@ function connect() {
         }
     };
     ws.onclose = () => {
+        // A server-initiated close leaves this socket in CLOSING (readyState 2) while JS keeps
+        // running, so a listen() in that window already opened its successor. Without this guard
+        // the stale close would null out the live socket and schedule a second one, and both
+        // would dispatch every frame from then on.
+        if (socket !== ws) return;
         socket = null;
         if (reconnectTimer) clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(() => {
