@@ -4,6 +4,7 @@ const PROXIED_HOSTS = new Set([
     "lichess.org",
     "explorer.lichess.ovh",
     "tablebase.lichess.ovh",
+    "www.chessdb.cn",
 ]);
 
 export async function fetch(

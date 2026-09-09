@@ -16,6 +16,7 @@ const ALLOWED_HOSTS: &[&str] = &[
     "lichess.org",
     "explorer.lichess.ovh",
     "tablebase.lichess.ovh",
+    "www.chessdb.cn",
 ];
 
 const USER_AGENT: &str = "en-croissant-web (+https://github.com/Tommerzil/en-croissant-web)";

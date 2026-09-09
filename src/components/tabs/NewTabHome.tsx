@@ -47,6 +47,8 @@ import { FileIcon } from "@/components/files/FileIcon";
 
 dayjs.extend(relativeTime);
 
+const isWeb = !!import.meta.env.VITE_WEB;
+
 function RecentFileDuePositions({ file }: { file: string }) {
   const [deck] = useAtom(
     deckAtomFamily({
@@ -243,6 +245,16 @@ export default function NewTabHome({ id }: { id: string }) {
     },
   ];
 
+  // Play-versus-engine and puzzle training are out of scope for the web build.
+  const visibleCards = cards.filter(
+    (card) =>
+      !(
+        isWeb &&
+        (card.title === t("Home.Card.PlayChess.Title") ||
+          card.title === t("Home.Card.Puzzle.Title"))
+      ),
+  );
+
   return (
     <>
       <ImportModal
@@ -254,7 +266,7 @@ export default function NewTabHome({ id }: { id: string }) {
       <CreateRepertoireModal opened={openRepertoireModal} setOpened={setOpenRepertoireModal} />
       <Stack gap="lg" pt="sm">
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 5 }}>
-          {cards.map((card) => (
+          {visibleCards.map((card) => (
             <Card shadow="sm" p="lg" radius="md" withBorder key={card.title}>
               <Stack align="center" h="100%" justify="space-between">
                 {card.icon}

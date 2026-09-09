@@ -15,12 +15,23 @@ describe("http shim", () => {
                 encodeURIComponent("https://api.chess.com/pub/player/tommerzil00/games/archives"),
         );
     });
+    it("proxies chessdb cloud evaluation GETs", async () => {
+        const f = vi.fn(async () => new Response("{}", { status: 200 }));
+        vi.stubGlobal("fetch", f);
+        const url =
+            "https://www.chessdb.cn/cdb.php?action=queryall&board=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR+w+KQkq+-+0+1&json=1";
+        await httpFetch(url);
+        expect((f.mock.calls[0] as any)[0]).toBe("/api/proxy?url=" + encodeURIComponent(url));
+    });
     it("passes other hosts and methods straight through", async () => {
         const f = vi.fn(async () => new Response("{}", { status: 200 }));
         vi.stubGlobal("fetch", f);
         await httpFetch("https://example.com/x");
         await httpFetch("https://lichess.org/api/account", { method: "POST" });
+        // The allowlist is exact: the bare apex is not the same host as www.
+        await httpFetch("https://chessdb.cn/cdb.php");
         expect((f.mock.calls[0] as any)[0]).toBe("https://example.com/x");
         expect((f.mock.calls[1] as any)[0]).toBe("https://lichess.org/api/account");
+        expect((f.mock.calls[2] as any)[0]).toBe("https://chessdb.cn/cdb.php");
     });
 });

@@ -6,6 +6,10 @@ fn allowlist() {
     assert!(is_allowed("https://api.chess.com/pub/player/x/games/2024/01"));
     assert!(is_allowed("https://www.chess.com/callback/live/game/1"));
     assert!(is_allowed("https://explorer.lichess.ovh/masters?fen=x"));
+    // chessdb cloud evaluation (analysis board).
+    assert!(is_allowed("https://www.chessdb.cn/cdb.php?action=queryall&board=x&json=1"));
+    // The allowlist is exact: the bare apex is not the same host as www.
+    assert!(!is_allowed("https://chessdb.cn/cdb.php"));
     assert!(!is_allowed("https://evil.example/api.chess.com"));
     assert!(!is_allowed("http://api.chess.com/insecure"));
     assert!(!is_allowed("file:///etc/passwd"));
