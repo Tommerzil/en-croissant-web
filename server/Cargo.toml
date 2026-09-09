@@ -1,0 +1,35 @@
+[package]
+name = "chess-server"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+name = "chess_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "chess-server"
+path = "src/main.rs"
+
+[dependencies]
+en-croissant = { path = "../src-tauri", default-features = false, features = ["server"] }
+axum = { version = "0.8", features = ["ws", "macros"] }
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dashmap = "6"
+rusqlite = { version = "0.28", features = ["bundled"] }
+reqwest = { version = "0.12", features = ["stream", "json"] }
+futures-util = "0.3"
+sysinfo = "0.29"
+log = "0.4"
+env_logger = "0.11"
+bytes = "1"
+mime_guess = "2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio-tungstenite = "0.24"
