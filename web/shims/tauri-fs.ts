@@ -80,7 +80,13 @@ export async function writeTextFile(
     );
 }
 
-export async function writeFile(path: string | URL, data: Uint8Array, _opts?: Opts): Promise<void> {
+// Uint8Array<ArrayBuffer> and not the default Uint8Array<ArrayBufferLike>: a
+// SharedArrayBuffer-backed view is not a valid fetch body.
+export async function writeFile(
+    path: string | URL,
+    data: Uint8Array<ArrayBuffer>,
+    _opts?: Opts,
+): Promise<void> {
     await check(
         await fetch(fsUrl("write", p(path)), {
             method: "PUT",

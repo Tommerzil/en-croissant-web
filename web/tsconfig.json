@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    // The root config sets incremental; a second project would drop its own .tsbuildinfo here.
+    "incremental": false
+  },
+  // ../src/vite-env.d.ts carries the vite/client types (import.meta.env, *.module.css) that
+  // src files reach through main.ts's dynamic import of the app entry.
+  "include": ["**/*", "../src/vite-env.d.ts"],
+  "exclude": ["node_modules"]
+}

@@ -14,6 +14,7 @@
     "build-web": "vite build --config web/vite.config.ts",
     "dev-web": "vite --config web/vite.config.ts",
     "test-web": "vitest run --config web/vite.config.ts",
+    "typecheck-web": "tsgo --noEmit -p web/tsconfig.json",
     "lint": "tsgo --noEmit && oxlint",
     "lint:ci": "tsgo --noEmit && oxfmt --check && oxlint --format=github && i18next-cli extract --ci",
     "lint:fix": "oxlint --fix",

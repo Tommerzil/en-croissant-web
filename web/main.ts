@@ -6,7 +6,7 @@ async function boot() {
     seedDefaults({ "telemetry-enabled": "false" });
     // Must happen before the app module is evaluated: jotai atoms read storage at import time.
     installGlobalStorage();
-    await import("../src/index.tsx");
+    await import("../src/index");
 }
 
 boot().catch((e) => {
