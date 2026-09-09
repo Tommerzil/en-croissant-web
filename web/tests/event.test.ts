@@ -33,6 +33,8 @@ describe("event shim", () => {
     afterEach(async () => {
         const m = await import("../shims/tauri-event");
         m.__test_reset();
+        // The visibility tests replace jsdom's prototype getter; put it back.
+        delete (document as any).visibilityState;
         vi.unstubAllGlobals();
         vi.useRealTimers();
     });
@@ -94,6 +96,39 @@ describe("event shim", () => {
         FakeSocket.instances[1].open();
         FakeSocket.instances[1].push({ event: "x", id: 1, payload: 1 });
         expect(cb).toHaveBeenCalledTimes(1);
+    });
+
+    it("reconnects at once when the tab becomes visible after a half-open drop", async () => {
+        const { listen } = await import("../shims/tauri-event");
+        await listen("x", () => {});
+        FakeSocket.instances[0].open();
+        // A half-open socket: the transport is gone but no close event ever fires,
+        // so nothing is scheduled and the shim would otherwise sit there forever.
+        FakeSocket.instances[0].readyState = 3;
+        Object.defineProperty(document, "visibilityState", {
+            configurable: true,
+            get: () => "visible",
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+        // No timers advanced: waking must reconnect immediately.
+        expect(FakeSocket.instances).toHaveLength(2);
+    });
+
+    it("reconnects at once when the network comes back", async () => {
+        const { listen } = await import("../shims/tauri-event");
+        await listen("x", () => {});
+        FakeSocket.instances[0].open();
+        FakeSocket.instances[0].readyState = 3;
+        window.dispatchEvent(new Event("online"));
+        expect(FakeSocket.instances).toHaveLength(2);
+    });
+
+    it("waking leaves a healthy socket alone", async () => {
+        const { listen } = await import("../shims/tauri-event");
+        await listen("x", () => {});
+        FakeSocket.instances[0].open();
+        window.dispatchEvent(new Event("online"));
+        expect(FakeSocket.instances).toHaveLength(1);
     });
 
     it("local emit reaches local listeners", async () => {

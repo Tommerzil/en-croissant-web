@@ -27,6 +27,7 @@ const handlers = new Map<string, Set<EventCallback<any>>>();
 let socket: WebSocket | null = null;
 let backoffMs = 500;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let listenersRegistered = false;
 let localId = 1;
 
 function dispatch(ev: Event<unknown>) {
@@ -35,7 +36,34 @@ function dispatch(ev: Event<unknown>) {
     for (const cb of Array.from(set)) cb(ev);
 }
 
+/**
+ * A half-open socket (a sleeping laptop, a NAT or proxy idle-drop on the tailnet)
+ * never fires `close`, so the backoff below never runs and engine events stop
+ * arriving with no visible sign. Waking and coming back online are the moments
+ * we know connectivity changed, so re-check the socket then and reconnect at
+ * once rather than waiting out a backoff that may never have been scheduled.
+ */
+function wake() {
+    if (socket && socket.readyState <= 1) return;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    backoffMs = 500;
+    connect();
+}
+
+function onVisibilityChange() {
+    if (document.visibilityState === "visible") wake();
+}
+
+function registerLivenessListeners() {
+    if (listenersRegistered || typeof window === "undefined") return;
+    listenersRegistered = true;
+    window.addEventListener("online", wake);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+}
+
 function connect() {
+    registerLivenessListeners();
     if (socket && socket.readyState <= 1) return;
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${proto}//${location.host}/ws/events`);
@@ -103,4 +131,9 @@ export function __test_reset() {
     reconnectTimer = null;
     socket = null;
     backoffMs = 500;
+    if (listenersRegistered && typeof window !== "undefined") {
+        window.removeEventListener("online", wake);
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+    }
+    listenersRegistered = false;
 }
