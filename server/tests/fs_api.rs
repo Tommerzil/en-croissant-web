@@ -58,3 +58,42 @@ async fn read_missing_is_404() {
     let r = reqwest::get(format!("{}/api/fs/read?path=/nope", s.base_url)).await.unwrap();
     assert_eq!(r.status(), 404);
 }
+
+#[tokio::test]
+async fn download_non_ascii_filename_uses_rfc5987() {
+    let s = common::spawn().await;
+    let c = Client::new();
+    let u = |p: &str| format!("{}{p}", s.base_url);
+
+    let r = c
+        .put(u("/api/fs/write?path=/documents/x/partie_%C3%A9checs.pgn"))
+        .body("1. e4 *")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 204);
+
+    let r = c.get(u("/api/fs/download?path=/documents/x/partie_%C3%A9checs.pgn")).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    let cd = r.headers()["content-disposition"].to_str().unwrap().to_string();
+    assert!(cd.contains("filename*=UTF-8''partie_%C3%A9checs.pgn"), "got {cd}");
+}
+
+#[tokio::test]
+async fn download_filename_with_quote_and_newline_does_not_panic() {
+    let s = common::spawn().await;
+    let c = Client::new();
+    let u = |p: &str| format!("{}{p}", s.base_url);
+
+    // filename: a"b\nc.pgn
+    let path = "/documents/x/a%22b%0Ac.pgn";
+    let r = c.put(u(&format!("/api/fs/write?path={path}"))).body("1. e4 *").send().await.unwrap();
+    assert_eq!(r.status(), 204);
+
+    let r = c.get(u(&format!("/api/fs/download?path={path}"))).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    let cd = r.headers()["content-disposition"].to_str().unwrap().to_string();
+    assert!(cd.starts_with("attachment"), "got {cd}");
+    assert!(!cd.contains('\n'));
+    assert!(cd.contains("filename*=UTF-8''a%22b%0Ac.pgn"), "got {cd}");
+}

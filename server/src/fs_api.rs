@@ -60,6 +60,32 @@ async fn stat(State(app): State<App>, Query(q): Query<PathQuery>) -> Result<Json
     }))
 }
 
+/// Build a `Content-Disposition` header value that never panics.
+///
+/// `HeaderValue` rejects control characters and non-visible-ASCII bytes, so the raw filename can
+/// never be interpolated: we emit an ASCII-safe `filename=` fallback plus the RFC 5987
+/// `filename*=UTF-8''<percent-encoded>` form, and degrade to a bare `attachment` on any error.
+fn content_disposition(name: &str) -> header::HeaderValue {
+    // ASCII fallback: keep only printable ASCII, drop quotes and backslashes.
+    let ascii: String = name
+        .chars()
+        .filter(|c| matches!(c, ' '..='~') && *c != '"' && *c != '\\')
+        .collect();
+    let ascii = if ascii.trim().is_empty() { "download".to_string() } else { ascii };
+
+    // RFC 5987 / percent-encoding: anything outside the unreserved set becomes %XX.
+    let mut enc = String::with_capacity(name.len());
+    for b in name.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => enc.push(*b as char),
+            _ => enc.push_str(&format!("%{b:02X}")),
+        }
+    }
+
+    let v = format!("attachment; filename=\"{ascii}\"; filename*=UTF-8''{enc}");
+    header::HeaderValue::from_str(&v).unwrap_or_else(|_| header::HeaderValue::from_static("attachment"))
+}
+
 fn file_response(path: &std::path::Path, attachment: bool) -> Result<Response, ApiError> {
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
@@ -76,10 +102,8 @@ fn file_response(path: &std::path::Path, attachment: bool) -> Result<Response, A
         .into_response();
     if attachment {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        resp.headers_mut().insert(
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{}\"", name.replace('"', "")).parse().unwrap(),
-        );
+        resp.headers_mut()
+            .insert(header::CONTENT_DISPOSITION, content_disposition(&name));
     }
     Ok(resp)
 }
