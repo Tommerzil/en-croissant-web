@@ -30,3 +30,54 @@ tsconfig.tsbuildinfo
 src-tauri/gen/
 
 __pycache__/
+
+# --- Secrets and local deployment state (public repo: keep these out) ---
+# Environment files; only *.example templates are ever committed.
+.env
+.env.*
+!.env.example
+!*.env.example
+deploy/.env
+
+# Key material and credentials of any kind
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+id_rsa*
+id_ecdsa*
+id_ed25519*
+*.gpg
+*.asc
+.netrc
+.npmrc
+.pypirc
+credentials*.json
+secrets.*
+*.secret
+*_token
+*.token
+
+# Concrete deployment config naming a real host, domain or tailnet address.
+# Commit deploy/Caddyfile.*.example with placeholders instead.
+deploy/Caddyfile.chess
+deploy/*.local.*
+
+# Chess data and runtime state: never belongs in the repo
+data/
+engines/
+puzzles/
+documents/
+*.db3
+*.db3-shm
+*.db3-wal
+*.ecsi
+*.pgn
+*.nnue
+settings.db3
+
+# Agent scratch workspace
+.superpowers/
