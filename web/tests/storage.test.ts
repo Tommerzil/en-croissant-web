@@ -78,6 +78,113 @@ describe("serverStorage", () => {
         flushNow();
         expect((navigator.sendBeacon as any).mock.calls[0][0]).toBe("/api/kv/x");
     });
+
+    it("keeps the value pending when the server rejects the write", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const { preloadStorage, serverStorage, flushNow } = await import("../storage");
+        await preloadStorage();
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 500 })));
+        serverStorage.setItem("y", "1");
+        await vi.advanceTimersByTimeAsync(350);
+        expect(warn).toHaveBeenCalled();
+        // Still pending, so a later flush retries it rather than silently dropping it.
+        flushNow();
+        expect((navigator.sendBeacon as any).mock.calls).toEqual([["/api/kv/y", "1"]]);
+        warn.mockRestore();
+    });
+
+    it("does not let a failed in-flight write clobber a newer value", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const { preloadStorage, serverStorage, flushNow } = await import("../storage");
+        await preloadStorage();
+
+        const bodies: (string | undefined)[] = [];
+        let rejectFirst: (e: Error) => void = () => {};
+        let first = true;
+        vi.stubGlobal(
+            "fetch",
+            vi.fn((_url: string, init?: RequestInit) => {
+                bodies.push(init?.body as string | undefined);
+                if (first) {
+                    first = false;
+                    return new Promise<Response>((_resolve, reject) => {
+                        rejectFirst = reject;
+                    });
+                }
+                return Promise.resolve(new Response(null, { status: 204 }));
+            }),
+        );
+
+        serverStorage.setItem("k", "A");
+        await vi.advanceTimersByTimeAsync(350); // push("A") starts; its fetch stays in flight
+        expect(bodies).toEqual(["A"]);
+
+        serverStorage.setItem("k", "B"); // newer value queued behind a new timer
+        rejectFirst(new Error("network down"));
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(0); // let push's catch run
+
+        await vi.advanceTimersByTimeAsync(350); // the new timer fires
+        expect(bodies).toEqual(["A", "B"]); // never a second, stale "A"
+
+        flushNow();
+        expect((navigator.sendBeacon as any).mock.calls).toHaveLength(0);
+        warn.mockRestore();
+    });
+
+    it("does not re-queue a stale write whose successor already succeeded", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const { preloadStorage, serverStorage, flushNow } = await import("../storage");
+        await preloadStorage();
+
+        const bodies: (string | undefined)[] = [];
+        let rejectFirst: (e: Error) => void = () => {};
+        let first = true;
+        vi.stubGlobal(
+            "fetch",
+            vi.fn((_url: string, init?: RequestInit) => {
+                bodies.push(init?.body as string | undefined);
+                if (first) {
+                    first = false;
+                    return new Promise<Response>((_resolve, reject) => {
+                        rejectFirst = reject;
+                    });
+                }
+                return Promise.resolve(new Response(null, { status: 204 }));
+            }),
+        );
+
+        serverStorage.setItem("k", "A");
+        await vi.advanceTimersByTimeAsync(350); // push("A") starts; its fetch stays in flight
+        serverStorage.setItem("k", "B");
+        await vi.advanceTimersByTimeAsync(350); // push("B") runs to completion, 204
+        expect(bodies).toEqual(["A", "B"]);
+
+        rejectFirst(new Error("network down")); // the older request fails only now
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+
+        // `pending` is empty at this point, so the pending-only guard would let "A" back in.
+        flushNow();
+        expect((navigator.sendBeacon as any).mock.calls).toHaveLength(0);
+        await vi.advanceTimersByTimeAsync(350);
+        expect(bodies).toEqual(["A", "B"]);
+        warn.mockRestore();
+    });
+
+    it("keeps writes pending when sendBeacon refuses them", async () => {
+        const { preloadStorage, serverStorage, flushNow } = await import("../storage");
+        await preloadStorage();
+        vi.stubGlobal("navigator", { sendBeacon: vi.fn(() => false) });
+        serverStorage.setItem("z", "9");
+        flushNow();
+        expect(navigator.sendBeacon as any).toHaveBeenCalledWith("/api/kv/z", "9");
+        // The beacon was refused, so the timer must survive and the write still go out.
+        await vi.advanceTimersByTimeAsync(350);
+        const puts = calls.filter((c) => c.method === "PUT" && c.url === "/api/kv/z");
+        expect(puts).toHaveLength(1);
+        expect(puts[0].body).toBe("9");
+    });
 });
 
 describe("jotai/utils shim", () => {

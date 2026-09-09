@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use axum::extract::{Path as UrlPath, State};
+use axum::extract::{DefaultBodyLimit, Path as UrlPath, State};
 use axum::http::StatusCode;
 use axum::routing::{get, put};
 use axum::{Json, Router};
@@ -51,5 +51,9 @@ async fn remove(State(app): State<App>, UrlPath(key): UrlPath<String>) -> Result
 pub fn router() -> Router<App> {
     Router::new()
         .route("/api/kv", get(get_all))
-        .route("/api/kv/{key}", put(set).post(set).delete(remove))
+        // Upstream keeps whole game trees in per-tab storage, well above axum's 2 MiB default.
+        .route(
+            "/api/kv/{key}",
+            put(set).post(set).delete(remove).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
 }

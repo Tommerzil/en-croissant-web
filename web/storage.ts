@@ -63,28 +63,38 @@ class ServerStorage implements Storage {
         this.pending.delete(key);
         const url = `/api/kv/${encodeURIComponent(key)}`;
         try {
-            if (value === null) await fetch(url, { method: "DELETE" });
-            else await fetch(url, { method: "PUT", body: value, headers: { "content-type": "text/plain" } });
+            // `fetch` only rejects on network failure, so a 413 or 500 has to be
+            // turned into a throw or the write would be dropped silently.
+            const res =
+                value === null
+                    ? await fetch(url, { method: "DELETE" })
+                    : await fetch(url, { method: "PUT", body: value, headers: { "content-type": "text/plain" } });
+            if (!res.ok) throw new Error(`settings write failed: ${res.status}`);
         } catch (e) {
             console.warn("settings write failed, will retry on next change", key, e);
-            this.pending.set(key, value);
+            // Re-queue only if this write is still the current one. A newer value may
+            // have been queued (or already stored) while this request was in flight;
+            // re-queueing then would push stale data over it.
+            const superseded =
+                this.pending.has(key) || (value === null ? this.cache.has(key) : this.cache.get(key) !== value);
+            if (!superseded) this.pending.set(key, value);
         }
     }
 
     /** Synchronous best-effort flush for pagehide. */
     flush(): void {
-        for (const [key, value] of this.pending) {
+        // Snapshot: entries are removed from `pending` as they are accepted.
+        for (const [key, value] of Array.from(this.pending)) {
             const url = `/api/kv/${encodeURIComponent(key)}`;
-            if (value === null) {
-                // sendBeacon cannot DELETE; write an empty marker the server treats as absent next load.
-                navigator.sendBeacon(url, "");
-            } else {
-                navigator.sendBeacon(url, value);
-            }
+            // sendBeacon cannot DELETE; write an empty marker the server treats as absent next load.
+            // It returns false past the browser's beacon queue cap — leave those entries pending
+            // with their timers intact so the normal fetch path still gets a chance at them.
+            if (!navigator.sendBeacon(url, value === null ? "" : value)) continue;
+            this.pending.delete(key);
+            const t = this.timers.get(key);
+            if (t) clearTimeout(t);
+            this.timers.delete(key);
         }
-        this.pending.clear();
-        for (const t of this.timers.values()) clearTimeout(t);
-        this.timers.clear();
     }
 }
 
