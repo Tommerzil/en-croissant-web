@@ -1,4 +1,5 @@
 pub mod app;
+pub mod paths;
 pub mod routes_extra;
 pub mod static_files;
 

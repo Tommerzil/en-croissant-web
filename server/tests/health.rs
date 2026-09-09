@@ -13,6 +13,11 @@ async fn health_and_spa_fallback() {
     assert_eq!(r.status(), 200);
     assert!(r.text().await.unwrap().contains("<title>test</title>"));
 
+    // Unknown API paths 404 rather than getting the SPA shell.
+    let r = reqwest::get(format!("{}/api/cmd/does_not_exist", s.base_url)).await.unwrap();
+    assert_eq!(r.status(), 404);
+    assert_eq!(r.json::<String>().await.unwrap(), "not found");
+
     let r = common::cmd(&s, "memory_size", serde_json::json!({})).await;
     assert_eq!(r.status(), 200);
     assert!(r.json::<u32>().await.unwrap() > 0);
