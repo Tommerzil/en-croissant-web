@@ -25,6 +25,10 @@ pub fn spawn_reaper(app: App, idle: Duration, tick: Duration) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(tick).await;
+            // Hold the reap lock for the whole sweep, snapshot included: see
+            // `App::reap_lock`. `engine_processes.iter()` takes blocking shard
+            // read-locks, so even the snapshot must not race a concurrent kill.
+            let _g = app.reap_lock.lock().await;
             let now = Instant::now();
             // `engine_processes` is keyed by (tab, id); `kill_engine` rebuilds that
             // same key from the id it is given.
@@ -56,6 +60,9 @@ pub fn spawn_reaper(app: App, idle: Duration, tick: Duration) {
 pub fn on_client_disconnect(app: App) {
     tokio::spawn(async move {
         tokio::time::sleep(grace()).await;
+        // Taken before the `is_empty` probe, which is itself a blocking shard
+        // read on `engine_processes`: see `App::reap_lock`.
+        let _g = app.reap_lock.lock().await;
         if app.clients.load(Ordering::SeqCst) == 0 && !app.ctx.state.engine_processes.is_empty() {
             log::info!("no clients for {:?}, killing all engines", grace());
             // kill_engines matches tabs by prefix; the empty prefix matches all.

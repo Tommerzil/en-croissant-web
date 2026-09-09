@@ -98,3 +98,40 @@ async fn last_client_disconnect_kills_engines_after_grace() {
     tokio::time::sleep(Duration::from_millis(600)).await;
     assert_eq!(s.app.ctx.state.engine_processes.len(), 0);
 }
+
+/// Both background killers at once: the idle reaper sweeping while the
+/// post-disconnect sweep fires. Upstream holds a DashMap shard guard across
+/// `process.kill().await`, so an unserialized pair can stall; `App::reap_lock`
+/// keeps them apart. A regression here hangs, so the wait is wrapped in a
+/// timeout and the timeout result is asserted.
+#[tokio::test]
+async fn concurrent_reaper_and_disconnect_kills_do_not_deadlock() {
+    let s = common::spawn().await;
+    let engine = install_stub(&s);
+    let (ws, _) = connect_async(&s.ws_url).await.unwrap();
+    common::cmd(&s, "get_best_moves", best_moves_args(&engine, "both")).await;
+    wait_for_engines(&s, 1).await;
+
+    // Set-once OnceLock; another test in this binary may have set it already, so
+    // whatever value it holds is what we wait on (all candidates are << 2 s).
+    chess_server::engines::set_disconnect_grace_for_tests(Duration::from_millis(50));
+    chess_server::engines::spawn_reaper(
+        s.app.clone(),
+        Duration::from_millis(50),
+        Duration::from_millis(20),
+    );
+    drop(ws);
+
+    let drained = tokio::time::timeout(Duration::from_secs(5), async {
+        for _ in 0..200 {
+            if s.app.ctx.state.engine_processes.is_empty() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        false
+    })
+    .await;
+    assert!(drained.is_ok(), "deadlock: kill paths did not complete in 5s");
+    assert!(drained.unwrap(), "engine_processes not empty within 2s");
+}

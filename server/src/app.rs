@@ -15,6 +15,13 @@ pub struct App {
     pub clients: Arc<AtomicUsize>,
     /// Last command that named a tab, keyed by tab id. Drives the idle reaper.
     pub last_seen: Arc<DashMap<String, Instant>>,
+    /// Serializes the two background engine killers (the idle reaper and the
+    /// post-disconnect sweep). Upstream `kill_engine` / `kill_engines` hold a
+    /// DashMap shard guard on `engine_processes` across `process.kill().await`
+    /// (`src-tauri/src/chess.rs`), so two killers touching the same shard
+    /// concurrently can stall each other. Upstream is not ours to change; we
+    /// keep the killers from interleaving instead.
+    pub reap_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl App {
@@ -23,6 +30,7 @@ impl App {
             ctx,
             clients: Arc::new(AtomicUsize::new(0)),
             last_seen: Arc::new(DashMap::new()),
+            reap_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
