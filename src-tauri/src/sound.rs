@@ -135,8 +135,8 @@ mod server {
 #[cfg(target_os = "linux")]
 pub use server::start_sound_server;
 
-#[tauri::command]
-#[specta::specta]
+#[cfg_attr(feature = "tauri", tauri::command)]
+#[cfg_attr(feature = "tauri", specta::specta)]
 pub fn get_sound_server_port(
     state: tauri::State<'_, SoundServerPort>,
 ) -> Result<u16, Error> {

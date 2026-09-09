@@ -1,3 +1,4 @@
+use crate::ctx::{AppCtx, AppStateRef};
 use std::{
     fs::{File, OpenOptions},
     io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write},
@@ -151,11 +152,11 @@ fn ignore_bom(reader: &mut BufReader<File>) -> io::Result<u64> {
     Ok(3)
 }
 
-#[tauri::command]
-#[specta::specta]
+#[cfg_attr(feature = "tauri", tauri::command)]
+#[cfg_attr(feature = "tauri", specta::specta)]
 pub async fn count_pgn_games(
     file: PathBuf,
-    state: tauri::State<'_, AppState>,
+    state: AppStateRef<'_>,
 ) -> Result<i32, Error> {
     let files_string = file.to_string_lossy().to_string();
 
@@ -182,13 +183,13 @@ pub async fn count_pgn_games(
     Ok(count)
 }
 
-#[tauri::command]
-#[specta::specta]
+#[cfg_attr(feature = "tauri", tauri::command)]
+#[cfg_attr(feature = "tauri", specta::specta)]
 pub async fn read_games(
     file: PathBuf,
     start: i32,
     end: i32,
-    state: tauri::State<'_, AppState>,
+    state: AppStateRef<'_>,
 ) -> Result<Vec<String>, Error> {
     let file_r = File::open(&file)?;
 
@@ -208,12 +209,12 @@ pub async fn read_games(
     Ok(games)
 }
 
-#[tauri::command]
-#[specta::specta]
+#[cfg_attr(feature = "tauri", tauri::command)]
+#[cfg_attr(feature = "tauri", specta::specta)]
 pub async fn delete_game(
     file: PathBuf,
     n: i32,
-    state: tauri::State<'_, AppState>,
+    state: AppStateRef<'_>,
 ) -> Result<(), Error> {
     let file_r = File::open(&file)?;
 
@@ -240,13 +241,13 @@ fn write_to_end<R: Read>(reader: &mut R, writer: &mut File) -> io::Result<()> {
     Ok(())
 }
 
-#[tauri::command]
-#[specta::specta]
+#[cfg_attr(feature = "tauri", tauri::command)]
+#[cfg_attr(feature = "tauri", specta::specta)]
 pub async fn write_game(
     file_path: String,
     n: i32,
     pgn: String,
-    state: tauri::State<'_, AppState>,
+    state: AppStateRef<'_>,
 ) -> Result<(), Error> {
     let file = PathBuf::from(file_path);
     if !file.exists() {
