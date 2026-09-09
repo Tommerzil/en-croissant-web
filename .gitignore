@@ -27,3 +27,5 @@ tsconfig.tsbuildinfo
 *.sw?
 
 src-tauri/gen/
+
+__pycache__/

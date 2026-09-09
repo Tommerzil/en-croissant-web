@@ -1,6 +1,7 @@
 pub mod app;
 pub mod paths;
 pub mod routes_extra;
+pub mod routes_gen;
 pub mod static_files;
 
 use std::net::SocketAddr;
@@ -55,6 +56,7 @@ pub fn build_app(config: &Config) -> App {
 pub fn build_router(app: App, config: &Config) -> Router {
     Router::new()
         .merge(routes_extra::router())
+        .merge(routes_gen::router())
         .merge(static_files::router(&config.web_dir, &config.sound_dir))
         .with_state(app)
 }
