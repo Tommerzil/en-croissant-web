@@ -33,7 +33,7 @@ services:
       resources:
         limits:
           memory: 4g
-          cpus: "3"
+          cpus: "${CHESS_CPUS:-3}"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/api/health"]
       interval: 30s
