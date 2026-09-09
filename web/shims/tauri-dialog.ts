@@ -61,7 +61,9 @@ export async function save(opts: SaveOptions = {}): Promise<string | null> {
         mode: "save",
         startDir: dir,
         extensions: exts,
-        defaultName: name || "untitled.pgn",
+        // No name from defaultPath: propose one using the caller's own first filter extension
+        // rather than a hard-coded ".pgn" (BoardControls exports a PNG into a directory).
+        defaultName: name || (exts[0] ? `untitled.${exts[0]}` : "untitled"),
     });
     return typeof out === "string" ? out : null;
 }

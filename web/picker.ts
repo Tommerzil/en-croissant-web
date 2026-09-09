@@ -42,8 +42,8 @@ export function pickPath(opts: PickOptions): Promise<string | string[] | null> {
           <header><button type="button" data-role="up">↑</button><code data-role="cwd"></code></header>
           <ul data-role="list"></ul>
           <footer>
-            <input data-role="filename" placeholder="filename" ${opts.mode === "open" && !opts.directory ? "hidden" : ""}>
-            <label ${opts.mode === "save" ? "hidden" : ""}><input type="file" data-role="upload" hidden ${opts.multiple ? "multiple" : ""}><button type="button" data-role="upload-btn">Upload…</button></label>
+            <input data-role="filename" placeholder="filename" ${opts.mode === "open" || opts.directory ? "hidden" : ""}>
+            <label data-role="upload-label" ${opts.mode === "save" || opts.directory ? "hidden" : ""}><input type="file" data-role="upload" hidden ${opts.multiple ? "multiple" : ""}><button type="button" data-role="upload-btn">Upload…</button></label>
             <button type="button" data-role="cancel">Cancel</button>
             <button type="button" data-role="confirm">OK</button>
           </footer>`;
@@ -74,7 +74,11 @@ export function pickPath(opts: PickOptions): Promise<string | string[] | null> {
             } catch {
                 entries = [];
             }
-            for (const e of entries.filter((e) => e.isDirectory || matches(e.name))) {
+            // In directory mode plain files are not listed at all, so a file can never end up
+            // being resolved as the picked directory.
+            for (const e of entries.filter(
+                (e) => e.isDirectory || (!opts.directory && matches(e.name)),
+            )) {
                 const li = document.createElement("li");
                 const b = document.createElement("button");
                 b.type = "button";
