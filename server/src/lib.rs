@@ -78,8 +78,10 @@ pub fn build_router(app: App, config: &Config) -> Router {
         .merge(ws::router())
         .merge(proxy::router())
         .merge(static_files::router(&config.web_dir, &config.sound_dir))
-        // After every merge so it also covers the SPA fallback: the guard is
-        // router-wide on purpose, so a route added later is covered too.
+        // `.layer` only wraps what was merged above it, so every route --
+        // including the SPA fallback -- must be merged BEFORE this line.
+        // A route added after this layer would be UNGUARDED against
+        // cross-site requests; keep new `.merge` calls above it.
         .layer(axum::middleware::from_fn(csrf::reject_cross_site))
         .with_state(app)
 }

@@ -1,6 +1,16 @@
+# Build-script approval is spelled differently across the pnpm versions in use:
+# CI pins pnpm 10 (.github/workflows), which reads `onlyBuiltDependencies`;
+# pnpm 12 (dev machines, deploy/Dockerfile) still parses that key but no longer
+# treats it as approval and needs `allowBuilds`. Keep the two lists in sync.
 onlyBuiltDependencies:
   - "@parcel/watcher"
   - "@swc/core"
   - core-js
   - esbuild
   - protobufjs
+allowBuilds:
+  "@parcel/watcher": true
+  "@swc/core": true
+  core-js: true
+  esbuild: true
+  protobufjs: true
