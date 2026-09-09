@@ -1,0 +1,99 @@
+export type UnlistenFn = () => void;
+export interface Event<T> {
+    event: string;
+    id: number;
+    payload: T;
+}
+export type EventCallback<T> = (event: Event<T>) => void;
+
+export const TauriEvent = {
+    WINDOW_RESIZED: "tauri://resize",
+    WINDOW_MOVED: "tauri://move",
+    WINDOW_CLOSE_REQUESTED: "tauri://close-requested",
+    WINDOW_DESTROYED: "tauri://destroyed",
+    WINDOW_FOCUS: "tauri://focus",
+    WINDOW_BLUR: "tauri://blur",
+    WINDOW_SCALE_FACTOR_CHANGED: "tauri://scale-change",
+    WINDOW_THEME_CHANGED: "tauri://theme-changed",
+    WINDOW_CREATED: "tauri://window-created",
+    WEBVIEW_CREATED: "tauri://webview-created",
+    DRAG_ENTER: "tauri://drag-enter",
+    DRAG_OVER: "tauri://drag-over",
+    DRAG_DROP: "tauri://drag-drop",
+    DRAG_LEAVE: "tauri://drag-leave",
+} as const;
+
+const handlers = new Map<string, Set<EventCallback<any>>>();
+let socket: WebSocket | null = null;
+let backoffMs = 500;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let localId = 1;
+
+function dispatch(ev: Event<unknown>) {
+    const set = handlers.get(ev.event);
+    if (!set) return;
+    for (const cb of Array.from(set)) cb(ev);
+}
+
+function connect() {
+    if (socket && socket.readyState <= 1) return;
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${proto}//${location.host}/ws/events`);
+    socket = ws;
+    ws.onopen = () => {
+        backoffMs = 500;
+    };
+    ws.onmessage = (e) => {
+        try {
+            dispatch(JSON.parse(String(e.data)) as Event<unknown>);
+        } catch (err) {
+            console.warn("bad event frame", err);
+        }
+    };
+    ws.onclose = () => {
+        socket = null;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+        }, backoffMs);
+        backoffMs = Math.min(backoffMs * 2, 10_000);
+    };
+    ws.onerror = () => ws.close();
+}
+
+export async function listen<T>(event: string, handler: EventCallback<T>): Promise<UnlistenFn> {
+    if (!handlers.has(event)) handlers.set(event, new Set());
+    handlers.get(event)!.add(handler);
+    connect();
+    return () => {
+        handlers.get(event)?.delete(handler);
+    };
+}
+
+export async function once<T>(event: string, handler: EventCallback<T>): Promise<UnlistenFn> {
+    let unlisten: UnlistenFn = () => {};
+    unlisten = await listen<T>(event, (e) => {
+        unlisten();
+        handler(e);
+    });
+    return unlisten;
+}
+
+/** Frontend-to-frontend emit; the server never receives these. */
+export async function emit(event: string, payload?: unknown): Promise<void> {
+    dispatch({ event, id: localId++, payload });
+}
+
+export async function emitTo(_target: unknown, event: string, payload?: unknown): Promise<void> {
+    return emit(event, payload);
+}
+
+/** Tests only. */
+export function __test_reset() {
+    handlers.clear();
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    socket = null;
+    backoffMs = 500;
+}
