@@ -1,5 +1,7 @@
 pub mod app;
 pub mod engines;
+pub mod fs_api;
+pub mod kv;
 pub mod paths;
 pub mod routes_extra;
 pub mod routes_gen;
@@ -57,6 +59,8 @@ pub fn build_app(config: &Config) -> App {
 
 pub fn build_router(app: App, config: &Config) -> Router {
     Router::new()
+        .merge(fs_api::router())
+        .merge(kv::router())
         .merge(routes_extra::router())
         .merge(routes_gen::router())
         .merge(ws::router())
