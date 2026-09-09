@@ -41,6 +41,7 @@ impl BaseEngine {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        command.kill_on_drop(true);
 
         #[cfg(target_os = "windows")]
         command.creation_flags(CREATE_NO_WINDOW);
