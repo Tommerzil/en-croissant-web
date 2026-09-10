@@ -40,7 +40,8 @@ TAB_PARAMS = {"tab", "tab_id"}
 # Struct arguments with a client path somewhere in their fields. The generator jails
 # whole parameters, not fields, so a command taking one must be hand-written in
 # routes_extra.rs (and listed in SKIP_FNS); seeing one here is a bug, not a case to
-# handle. Add a type here whenever a command argument grows a nested path.
+# handle. Add a type here whenever a command argument grows a nested path. Matched as a
+# substring of the type, so `Option<GameConfig>` and `Vec<GameConfig>` are caught too.
 NESTED_PATH_TYPES = {"AnalysisOptions", "GameConfig"}
 # Parameters that name an engine binary (must resolve under engines/).
 ENGINE_PARAMS = {("get_best_moves", "engine"), ("analyze_game", "engine"), ("get_engine_config", "path")}
@@ -87,7 +88,7 @@ def classify(fn: str, name: str, ty: str) -> str:
         return "ctx"
     if ty.startswith("AppStateRef"):
         return "state"
-    if ty.lstrip("&") in NESTED_PATH_TYPES:
+    if any(nested in ty for nested in NESTED_PATH_TYPES):
         raise SystemExit(
             f"{fn}.{name}: {ty} nests a client path the generator cannot jail; "
             "hand-write the route in routes_extra.rs and add the command to SKIP_FNS"
