@@ -43,8 +43,9 @@ writing can be torn. Then run `deploy/migrate.sh user@host /opt/chess/data` from
 desktop machine. It copies `db/` only — `engines/engines.json` holds desktop-absolute
 paths and must not travel.
 
-Upgrading Stockfish: the entrypoint seeds `/data/engines/stockfish` only when the
-directory is empty, so a rebuilt image never replaces an existing binary. To take a
+Upgrading Stockfish: the entrypoint seeds `/data/engines/stockfish` only when that
+path is absent — no file and no symlink there — so a rebuilt image never replaces an
+existing binary. To take a
 newer one, delete `/opt/chess/engines/stockfish` and restart the service.
 
 If the root disk gets tight, `docker builder prune -af` frees the build cache too, at the cost of the next build being cold (10 to 20 minutes).

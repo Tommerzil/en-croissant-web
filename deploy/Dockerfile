@@ -15,6 +15,14 @@ RUN pnpm build-web
 
 # ---- stage 2: server binary ---------------------------------------------
 FROM rust:1-trixie AS build
+# Escape hatch for a memory-starved target: `--build-arg CARGO_BUILD_JOBS=2` caps the codegen/link
+# parallelism that OOMs a small aarch64 box. The default is the literal `default` -- cargo's own
+# "use all cores" -- and not an empty string, which cargo rejects outright with
+# "could not parse ``. Number of parallel jobs should be `default` or a number."
+# Declared inside this stage on purpose: a pre-FROM ARG is not visible here and the ENV below
+# would then expand to exactly that empty string.
+ARG CARGO_BUILD_JOBS=default
+ENV CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev git && rm -rf /var/lib/apt/lists/*
 COPY src-tauri ./src-tauri

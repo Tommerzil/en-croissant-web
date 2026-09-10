@@ -151,7 +151,10 @@ async fn write(State(app): State<App>, Query(q): Query<WriteQuery>, req: Request
     // limit (or the reverse proxy's own limit, or a dropped connection) left a truncated database
     // or PGN at the real path. `NamedTempFile` removes the staged file on drop, which also covers
     // the case where axum drops this future because the client went away -- no `?` after that
-    // point would ever run. The dot prefix keeps the partial upload out of `list` output.
+    // point would ever run, and it covers a failed `persist` too. Staging in `parent` rather than a
+    // system temp dir is what makes that last step a same-filesystem rename, so the destination
+    // only ever holds the old file or the complete new one. The dot prefix only marks the staged
+    // file as scratch: `list` filters nothing, so an upload in flight does show up in a listing.
     let staged = tempfile::Builder::new()
         .prefix(".upload-")
         .tempfile_in(parent)
