@@ -18,8 +18,10 @@ use shakmaty::{
     fen::Fen, san::SanPlus, uci::UciMove, CastlingMode, Chess, Color, EnPassantMode, Position,
 };
 use specta::Type;
-use tauri::AppHandle;
+#[cfg(feature = "tauri")]
 use tauri_specta::Event;
+#[cfg(feature = "server")]
+use crate::ctx::WebEvent as _;
 use tokio::{
     sync::{watch, Mutex, RwLock},
     time::{interval, Duration},
@@ -140,7 +142,8 @@ pub struct GameState {
     pub black_player: String,
 }
 
-#[derive(Clone, Debug, Serialize, Type, Event)]
+#[derive(Clone, Debug, Serialize, Type)]
+#[cfg_attr(feature = "tauri", derive(tauri_specta::Event))]
 #[serde(rename_all = "camelCase")]
 pub struct GameMoveEvent {
     pub game_id: GameId,
@@ -149,22 +152,27 @@ pub struct GameMoveEvent {
     pub white_time: Option<u64>,
     pub black_time: Option<u64>,
 }
+crate::web_event!(GameMoveEvent, "game-move-event");
 
-#[derive(Clone, Debug, Serialize, Type, Event)]
+#[derive(Clone, Debug, Serialize, Type)]
+#[cfg_attr(feature = "tauri", derive(tauri_specta::Event))]
 #[serde(rename_all = "camelCase")]
 pub struct ClockUpdateEvent {
     pub game_id: GameId,
     pub white_time: Option<u64>,
     pub black_time: Option<u64>,
 }
+crate::web_event!(ClockUpdateEvent, "clock-update-event");
 
-#[derive(Clone, Debug, Serialize, Type, Event)]
+#[derive(Clone, Debug, Serialize, Type)]
+#[cfg_attr(feature = "tauri", derive(tauri_specta::Event))]
 #[serde(rename_all = "camelCase")]
 pub struct GameOverEvent {
     pub game_id: GameId,
     pub result: GameResult,
     pub moves: Vec<GameMove>,
 }
+crate::web_event!(GameOverEvent, "game-over-event");
 
 struct ClockState {
     white_time: Option<u64>,
@@ -665,7 +673,7 @@ impl GameManager {
         &self,
         game_id: &str,
         uci: &str,
-        app: &AppHandle,
+        app: &AppCtx,
     ) -> Result<GameState, Error> {
         let game = self
             .games
@@ -704,7 +712,7 @@ impl GameManager {
         Ok(controller.get_state())
     }
 
-    pub async fn take_back_move(&self, game_id: &str, app: &AppHandle) -> Result<GameState, Error> {
+    pub async fn take_back_move(&self, game_id: &str, app: &AppCtx) -> Result<GameState, Error> {
         let game = self
             .games
             .get(game_id)
@@ -768,7 +776,7 @@ impl GameManager {
         &self,
         game_id: &str,
         color: &str,
-        app: &AppHandle,
+        app: &AppCtx,
     ) -> Result<GameState, Error> {
         let game = self
             .games
@@ -1175,7 +1183,7 @@ fn apply_opening_book(config: GameConfig) -> Result<OpeningBookResult, Error> {
 fn spawn_engine_task(
     game_id: &GameId,
     controller: &Arc<RwLock<GameController>>,
-    app: &AppHandle,
+    app: &AppCtx,
 ) -> tokio::task::JoinHandle<Result<(), Error>> {
     let game_id_clone = game_id.clone();
     let controller_clone = controller.clone();
@@ -1369,7 +1377,7 @@ fn try_polyglot_book_move(controller: &GameController) -> Option<String> {
 async fn request_engine_move(
     game_id: &str,
     controller: &Arc<RwLock<GameController>>,
-    app: &AppHandle,
+    app: &AppCtx,
 ) -> Result<(), Error> {
     // Try polyglot book move first (only for engine turns with a loaded book)
     {

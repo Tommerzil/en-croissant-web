@@ -17,7 +17,6 @@ pub mod opening;
 pub mod pgn;
 pub mod progress;
 
-#[cfg(feature = "tauri")]
 pub mod game;
 #[cfg(feature = "tauri")]
 pub mod oauth;
@@ -58,7 +57,6 @@ pub struct AppState {
     pub analysis_cancel_flags: DashMap<String, Arc<AtomicBool>>,
     #[cfg(feature = "tauri")]
     pub auth: oauth::AuthState,
-    #[cfg(feature = "tauri")]
     pub game_manager: game::GameManager,
     pub progress_state: ProgressStore,
 }
