@@ -234,10 +234,21 @@ async fn game_finished_by_its_initial_moves_reads_back_as_finished() {
     let state: serde_json::Value = r.json().await.unwrap();
     assert_eq!(state["status"]["finished"]["result"]["type"], "blackWins");
 
-    // The loop stopped instead of asking the engine to move in a mated position.
+    // The loop stopped instead of asking the engine to move in a mated position, and
+    // quit it on the way out -- without the up-front check it would park there, with
+    // the engine alive, for as long as the server ran.
     let r = common::cmd(&s, "get_game_state", serde_json::json!({ "gameId": "mated" })).await;
     let state: serde_json::Value = r.json().await.unwrap();
     assert_eq!(state["ply"], 4);
+    let mut released = false;
+    for _ in 0..60 {
+        if stub_processes(&s) == 0 {
+            released = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(released, "engine still running for a game that was over before its loop");
     common::cmd(&s, "abort_game", serde_json::json!({ "gameId": "mated" })).await;
 }
 
