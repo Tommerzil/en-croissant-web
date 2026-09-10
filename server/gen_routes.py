@@ -37,6 +37,10 @@ NON_PATH_STRINGS: set[tuple[str, str]] = set()
 PATHY_NAME_RE = re.compile(r"(^|_)(path|file|dir|db|database|destination)(_|$)")
 # Parameters that carry the client's tab id (drive the idle reaper's last_seen map).
 TAB_PARAMS = {"tab", "tab_id"}
+# (module, parameter) pairs that name a live play-versus-engine game (drive the game
+# reaper's games_last_seen map). Keyed by module as well as name: `game_id` on a db or
+# pgn command is a row number in a file, not a game holding engines.
+GAME_PARAMS = {("game", "game_id")}
 # Struct arguments with a client path somewhere in their fields. The generator jails
 # whole parameters, not fields, so a command taking one must be hand-written in
 # routes_extra.rs (and listed in SKIP_FNS); seeing one here is a bug, not a case to
@@ -193,6 +197,8 @@ def render_command(c: Command) -> str:
     for p in json_params:
         if p.name in TAB_PARAMS:
             lines.append(f"    app.touch_tab(&args.{p.name});")
+        if (c.module, p.name) in GAME_PARAMS:
+            lines.append(f"    app.touch_game(&args.{p.name});")
     call = f"en_croissant::{c.module}::{c.name}({', '.join(call_arg(p) for p in c.params)})"
     if c.name in SPAWN_FNS:
         # Resolve jailed args eagerly (so a bad path is a 500 now), then detach.

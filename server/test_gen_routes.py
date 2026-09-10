@@ -135,6 +135,17 @@ class GenRoutesTest(unittest.TestCase):
         src = g.render_command(by["search_position"])
         self.assertIn("app.touch_tab(&args.tab_id);", src)
 
+    def test_game_id_touches_the_game_only_in_the_game_module(self):
+        # A game command's `game_id` names a live game holding engines, and must feed
+        # games_last_seen. `game_id` on a db command (delete_db_game, write_db_game) is
+        # a row in a file and must not.
+        src = ATTR_SAMPLE % "game_id: String"
+        self.assertIn("app.touch_game(&args.game_id);",
+                      g.render_command(g.parse_commands(src, "game")[0]))
+        src = ATTR_SAMPLE % "file: PathBuf, game_id: i32"
+        self.assertNotIn("touch_game",
+                         g.render_command(g.parse_commands(src, "db")[0]))
+
     def test_nested_path_types_are_refused(self):
         # Every type under src-tauri/src that owns a client path, wrappers and leaves
         # alike. A leaf taken directly -- a future command that configures one player, or

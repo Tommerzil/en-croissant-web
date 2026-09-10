@@ -15,8 +15,14 @@ pub struct App {
     pub clients: Arc<AtomicUsize>,
     /// Last command that named a tab, keyed by tab id. Drives the idle reaper.
     pub last_seen: Arc<DashMap<String, Instant>>,
-    /// Serializes the two background engine killers (the idle reaper and the
-    /// post-disconnect sweep). Upstream `kill_engine` / `kill_engines` hold a
+    /// Last command that named a play-versus-engine game, keyed by game id. Drives the
+    /// game reaper. Games need a map of their own: a game command carries a `gameId`
+    /// and never a `tab`, and a game owns its engines through the `GameManager` rather
+    /// than through `engine_processes`, so neither `last_seen` nor the engine reaper
+    /// can see them.
+    pub games_last_seen: Arc<DashMap<String, Instant>>,
+    /// Serializes the background killers (the engine idle reaper, the game reaper and
+    /// the post-disconnect sweep). Upstream `kill_engine` / `kill_engines` hold a
     /// DashMap shard guard on `engine_processes` across `process.kill().await`
     /// (`src-tauri/src/chess.rs`), so two killers touching the same shard
     /// concurrently can stall each other. Upstream is not ours to change; we
@@ -30,12 +36,19 @@ impl App {
             ctx,
             clients: Arc::new(AtomicUsize::new(0)),
             last_seen: Arc::new(DashMap::new()),
+            games_last_seen: Arc::new(DashMap::new()),
             reap_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
     pub fn touch_tab(&self, tab: &str) {
         self.last_seen.insert(tab.to_string(), Instant::now());
+    }
+
+    /// Called by every route that names a game, so an abandoned one can be told apart
+    /// from one whose player is simply thinking.
+    pub fn touch_game(&self, game_id: &str) {
+        self.games_last_seen.insert(game_id.to_string(), Instant::now());
     }
 }
 

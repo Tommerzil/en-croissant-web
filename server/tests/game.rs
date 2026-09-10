@@ -240,3 +240,108 @@ async fn game_finished_by_its_initial_moves_reads_back_as_finished() {
     assert_eq!(state["ply"], 4);
     common::cmd(&s, "abort_game", serde_json::json!({ "gameId": "mated" })).await;
 }
+
+/// Live processes started from this test's data dir. A game's engines are not in
+/// `engine_processes`, so this is the only way to see whether they are really gone.
+/// Zombies are skipped: an exited child stays listed until tokio reaps it.
+fn stub_processes(s: &common::TestServer) -> usize {
+    use sysinfo::{ProcessExt, SystemExt};
+    let needle = s
+        .data_dir
+        .path()
+        .join("engines/stub.sh")
+        .to_string_lossy()
+        .into_owned();
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes();
+    sys.processes()
+        .values()
+        .filter(|p| p.status() != sysinfo::ProcessStatus::Zombie)
+        .filter(|p| p.cmd().iter().any(|arg| arg.contains(&needle)))
+        .count()
+}
+
+/// A game nobody comes back to holds its engines for the life of the server: they are
+/// not in `engine_processes`, so the engine reaper cannot see them, and only
+/// `abort_game` or a restart under the same id ever removes a game. The game reaper is
+/// what ends it. Tests shorten the idle limit rather than waiting ten minutes.
+#[tokio::test]
+async fn idle_game_is_reaped_and_its_engines_released() {
+    let s = common::spawn().await;
+    let engine = install_stub(&s);
+
+    // Engine versus human: white moves once, then the game sits waiting for a player
+    // who never comes back, with a live engine process behind it.
+    let r = common::cmd(
+        &s,
+        "start_game",
+        serde_json::json!({
+            "gameId": "abandoned",
+            "config": game_config(engine_player(&engine), human_player()),
+        }),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    assert_eq!(stub_processes(&s), 1, "the game's engine should be running");
+
+    chess_server::engines::spawn_game_reaper(
+        s.app.clone(),
+        Duration::from_millis(200),
+        Duration::from_millis(50),
+    );
+
+    // Watched from outside: any command naming the game would touch it and keep it
+    // alive, so wait on the reaper's own bookkeeping and on the engine process.
+    let mut reaped = false;
+    for _ in 0..60 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        if !s.app.games_last_seen.contains_key("abandoned") {
+            reaped = true;
+            break;
+        }
+    }
+    assert!(reaped, "idle game was not reaped");
+
+    // The engine the game held is gone with it.
+    let mut released = false;
+    for _ in 0..60 {
+        if stub_processes(&s) == 0 {
+            released = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(released, "game engine still running after the game was reaped");
+
+    // And the game itself was torn down, not just forgotten by the reaper.
+    let r = common::cmd(&s, "get_game_state", serde_json::json!({ "gameId": "abandoned" })).await;
+    assert_eq!(r.status(), 500, "the reaped game should be gone from the manager");
+}
+
+/// A game being played is not idle: every command it answers keeps it alive.
+#[tokio::test]
+async fn a_game_that_keeps_answering_commands_is_not_reaped() {
+    let s = common::spawn().await;
+    let r = common::cmd(
+        &s,
+        "start_game",
+        serde_json::json!({
+            "gameId": "active",
+            "config": game_config(human_player(), human_player()),
+        }),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+
+    chess_server::engines::spawn_game_reaper(
+        s.app.clone(),
+        Duration::from_millis(300),
+        Duration::from_millis(50),
+    );
+    for _ in 0..8 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let r = common::cmd(&s, "get_game_state", serde_json::json!({ "gameId": "active" })).await;
+        assert_eq!(r.status(), 200, "a game answering commands must not be reaped");
+    }
+    common::cmd(&s, "abort_game", serde_json::json!({ "gameId": "active" })).await;
+}

@@ -66,6 +66,8 @@ pub fn build_app(config: &Config) -> Result<App, String> {
     let (ctx, _rx) = ServerCtx::new(Arc::new(AppState::default()), config.data_dir.clone());
     let app = App::new(ctx);
     engines::spawn_reaper(app.clone(), engines::IDLE_LIMIT, Duration::from_secs(30));
+    // Same idle limit: a game's engines are as expensive as an analysis engine's.
+    engines::spawn_game_reaper(app.clone(), engines::IDLE_LIMIT, Duration::from_secs(30));
     Ok(app)
 }
 
