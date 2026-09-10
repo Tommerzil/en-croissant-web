@@ -464,12 +464,15 @@ async fn an_engine_versus_engine_game_making_moves_is_not_reaped() {
         .unwrap()
         .ply;
 
+    // Generous against the fixture's ~100 ms a ply: nine other engine-spawning tests
+    // share this binary, and a shell `sleep` under load must not read as idleness. The
+    // window is still only half the line, so the game cannot run out of moves either.
     chess_server::engines::spawn_game_reaper(
         s.app.clone(),
-        Duration::from_millis(300),
+        Duration::from_millis(500),
         Duration::from_millis(50),
     );
-    tokio::time::sleep(Duration::from_millis(900)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     assert!(
         s.app.games_last_seen.contains_key("selfplay"),
