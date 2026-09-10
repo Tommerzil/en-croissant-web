@@ -611,6 +611,23 @@ async fn a_reaped_game_announces_that_it_ended() {
     .await;
     assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
 
+    // Which side forfeits depends on whose turn it is, so wait for the engine to have
+    // played white's move before arming the reaper -- otherwise a slow engine start
+    // decides the assertion. Read the manager directly: the HTTP route would touch the
+    // stamp. That move refreshes the stamp through the activity watcher, and the idle
+    // limit below expires it again a fifth of a second later.
+    let mut moved = false;
+    for _ in 0..100 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        if let Ok(state) = s.app.ctx.state.game_manager.get_game_state("announced").await {
+            if state.ply >= 1 {
+                moved = true;
+                break;
+            }
+        }
+    }
+    assert!(moved, "the engine never played its move");
+
     chess_server::engines::spawn_game_reaper(
         s.app.clone(),
         Duration::from_millis(200),
