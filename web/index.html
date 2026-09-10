@@ -3,7 +3,18 @@
   <head>
     <title>En Croissant</title>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover so env(safe-area-inset-*) is honoured on notched devices.
+         Pinch zoom is deliberately left enabled: this is a desktop-derived UI and zoom
+         is the escape hatch when a page has not been made responsive. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1a1b1e" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="En Croissant" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="icon" href="/favicon.ico" />
   </head>
   <body>
     <div id="app"></div>

@@ -1,5 +1,5 @@
 "use no memo";
-import { AppShellSection, Stack, Tooltip } from "@mantine/core";
+import { AppShellSection, Group, Stack, Tooltip } from "@mantine/core";
 import {
   type Icon,
   IconChess,
@@ -19,20 +19,33 @@ interface NavbarLinkProps {
   label: string;
   url: string;
   active?: boolean;
+  horizontal?: boolean;
 }
 
-function NavbarLink({ url, icon: Icon, label }: NavbarLinkProps) {
+function NavbarLink({ url, icon: Icon, label, horizontal }: NavbarLinkProps) {
   const match = useMatchRoute();
-  return (
+  const active = match({ to: url, fuzzy: true }) !== false;
+  const link = (
+    <Link
+      to={url}
+      aria-label={label}
+      className={cx(classes.link, {
+        [classes.horizontal]: horizontal,
+        [classes.active]: active && !horizontal,
+        [classes.activeHorizontal]: active && horizontal,
+      })}
+    >
+      <Icon size="1.5rem" stroke={1.5} />
+    </Link>
+  );
+  // A tooltip needs a hover, which a touch device has no way to produce, and it
+  // would sit off the top of the screen from a bottom bar. aria-label carries the
+  // name instead.
+  return horizontal ? (
+    link
+  ) : (
     <Tooltip label={label} position="right">
-      <Link
-        to={url}
-        className={cx(classes.link, {
-          [classes.active]: match({ to: url, fuzzy: true }) !== false,
-        })}
-      >
-        <Icon size="1.5rem" stroke={1.5} />
-      </Link>
+      {link}
     </Tooltip>
   );
 }
@@ -49,12 +62,27 @@ const linksdata = [
   { icon: IconCpu, label: "Engines", url: "/engines" },
 ];
 
-export function SideBar() {
+export function SideBar({ orientation = "vertical" }: { orientation?: "vertical" | "horizontal" }) {
   const { t } = useTranslation();
 
   const links = linksdata.map((link) => (
-    <NavbarLink {...link} label={t(`SideBar.${link.label}`)} key={link.label} />
+    <NavbarLink
+      {...link}
+      label={t(`SideBar.${link.label}`)}
+      key={link.label}
+      horizontal={orientation === "horizontal"}
+    />
   ));
+
+  // Bottom bar: one row, settings alongside the rest rather than pinned to an end.
+  if (orientation === "horizontal") {
+    return (
+      <Group h="100%" justify="space-around" gap={0} wrap="nowrap">
+        {links}
+        <NavbarLink icon={IconSettings} label={t("SideBar.Settings")} url="/settings" horizontal />
+      </Group>
+    );
+  }
 
   return (
     <>

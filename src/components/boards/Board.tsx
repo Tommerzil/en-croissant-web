@@ -1,5 +1,6 @@
 import type { DrawBrushes, DrawShape } from "@lichess-org/chessground/draw";
 import { ActionIcon, Box, Center, Group, Text, useMantineTheme } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { IconChevronRight } from "@tabler/icons-react";
 import {
@@ -48,6 +49,7 @@ import {
 import { keyMapAtom } from "@/state/keybinds";
 import classes from "@/styles/Chessboard.module.css";
 import { ANNOTATION_INFO, isBasicAnnotation } from "@/utils/annotation";
+import { COMPACT_CHROME_QUERY, STACKED_LAYOUT_QUERY } from "@/utils/breakpoints";
 import { getVariationLine } from "@/utils/chess";
 import { chessopsError, forceEnPassant, positionFromFen } from "@/utils/chessops";
 import { getTabFile, getTabGameNumber } from "@/utils/tabs";
@@ -128,6 +130,17 @@ function Board({
   const [pos, error] = positionFromFen(currentNode.fen);
   const [whiteFideOpen, setWhiteFideOpen] = useState(false);
   const [blackFideOpen, setBlackFideOpen] = useState(false);
+
+  // Matches the stacked pane layout in BoardsPage; see the sizing note below.
+  const stacked = useMediaQuery(STACKED_LAYOUT_QUERY, false, {
+    getInitialValueInEffect: false,
+  });
+  // When the shell drops its title bar the height budget below gains those rows.
+  // Phone landscape is the case that needs them: it keeps the desktop split, so the
+  // board is limited by height, and 2.25rem of it is a third of a board square.
+  const compactChrome = useMediaQuery(COMPACT_CHROME_QUERY, false, {
+    getInitialValueInEffect: false,
+  });
 
   const moveInput = useAtomValue(moveInputAtom);
   const showDests = useAtomValue(showDestsAtom);
@@ -379,19 +392,24 @@ function Board({
 
   return (
     <>
-      <Box w="100%" h="100%">
+      <Box w="100%" h={stacked ? "auto" : "100%"}>
         <Box
           style={{
             display: "flex",
             flexDirection: "column",
             width: "100%",
-            height: "100%",
+            // Stacked (narrow) layout inverts which axis is scarce. On desktop the
+            // pane height is fixed and maxWidth below keeps the square board inside
+            // it; on a phone the width is fixed and the board's own `aspect-ratio: 1`
+            // sets the height, which only works if nothing constrains it.
+            height: stacked ? "auto" : "100%",
             gap: "0.5rem",
             flexWrap: "nowrap",
             overflow: "hidden",
-            maxWidth:
-              //            topbar   bottompadding                tabs                                  bottomb    topbar   evalbar                                gaps    ???
-              `calc(100vh - 2.25rem - var(--mantine-spacing-sm) - 2.5rem - var(--mantine-spacing-sm) - ${BAR_HEIGHT} - ${BAR_HEIGHT} + 1.563rem + var(--mantine-spacing-md) - 1rem  - 0.2rem)`,
+            maxWidth: stacked
+              ? "100%"
+              : //                     topbar   bottompadding                tabs                                  bottomb    topbar   evalbar                                gaps    ???
+                `calc(100dvh - ${compactChrome ? "0rem" : "2.25rem"} - var(--mantine-spacing-sm) - 2.5rem - var(--mantine-spacing-sm) - ${BAR_HEIGHT} - ${BAR_HEIGHT} + 1.563rem + var(--mantine-spacing-md) - 1rem  - 0.2rem)`,
           }}
         >
           <BoardBar

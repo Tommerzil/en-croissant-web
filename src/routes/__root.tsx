@@ -1,4 +1,5 @@
 import { AppShell } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { createRootRouteWithContext, Outlet, useNavigate } from "@tanstack/react-router";
 import { TauriEvent } from "@tauri-apps/api/event";
@@ -22,6 +23,11 @@ import { SideBar } from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
 import { activeTabAtom, nativeBarAtom, tabsAtom } from "@/state/atoms";
 import { keyMapAtom } from "@/state/keybinds";
+import {
+  COMPACT_CHROME_QUERY,
+  STACKED_LAYOUT_BREAKPOINT,
+  STACKED_LAYOUT_QUERY,
+} from "@/utils/breakpoints";
 import { openFile } from "@/utils/files";
 import { createTab } from "@/utils/tabs";
 
@@ -88,6 +94,17 @@ export const Route = createRootRouteWithContext<{
 function RootLayout() {
   const isNative = useAtomValue(nativeBarAtom);
   const navigate = useNavigate();
+
+  // Phones and small tablets: the icon rail becomes a bottom bar so the board gets
+  // the full width, which is the axis it is short of.
+  const narrow = useMediaQuery(STACKED_LAYOUT_QUERY, false, {
+    getInitialValueInEffect: false,
+  });
+  // Also true for a phone in landscape, which is wide enough to keep the desktop
+  // layout but far too short to spend rows on a decorative title bar.
+  const compactChrome = useMediaQuery(COMPACT_CHROME_QUERY, false, {
+    getInitialValueInEffect: false,
+  });
 
   const [, setTabs] = useAtom(tabsAtom);
   const [, setActiveTab] = useAtom(activeTabAtom);
@@ -355,10 +372,20 @@ function RootLayout() {
     <AppShell
       navbar={{
         width: "3rem",
-        breakpoint: 0,
+        // The 3rem rail costs 13% of a phone's width, which is the axis the board
+        // needs. When stacked it is replaced by the footer bar below. Both ranges are
+        // driven by `narrow` rather than by `breakpoint`, because the stacked rule is
+        // not purely a width: a portrait tablet stacks while being wider than `sm`.
+        breakpoint: STACKED_LAYOUT_BREAKPOINT,
+        collapsed: { mobile: narrow, desktop: narrow },
+      }}
+      footer={{
+        height: "3.25rem",
+        collapsed: !narrow,
       }}
       header={
         isNative ||
+        compactChrome ||
         (import.meta.env.VITE_PLATFORM !== "win32" && import.meta.env.VITE_PLATFORM !== "linux")
           ? undefined
           : {
@@ -367,13 +394,31 @@ function RootLayout() {
       }
       styles={{
         main: {
-          height: "100vh",
+          // dvh, not vh: on mobile browsers 100vh is the height with the address bar
+          // hidden, so a vh-sized shell overflows by the height of that bar.
+          height: "100dvh",
           userSelect: "none",
         },
+        // Standalone mode on a notched phone puts the home indicator over the bottom
+        // of the viewport. Both vars are set so the footer's height and the padding
+        // AppShell leaves for it stay in agreement.
+        root: narrow
+          ? {
+              "--app-shell-footer-height": "calc(3.25rem + env(safe-area-inset-bottom, 0px))",
+              "--app-shell-footer-offset": "calc(3.25rem + env(safe-area-inset-bottom, 0px))",
+            }
+          : undefined,
+        footer: narrow ? { paddingBottom: "env(safe-area-inset-bottom, 0px)" } : undefined,
       }}
     >
       <AboutModal opened={opened} setOpened={setOpened} />
+      {/* The web build reports itself as linux, so it draws its own title bar with
+          minimise/maximise/close. Those do nothing in a browser tab and the bar costs
+          2.25rem of the axis a phone has least of, so it is dropped when narrow. The
+          File menu goes with it; navigation is the bottom bar, and files are reachable
+          from the Files page. */}
       {!isNative &&
+        !compactChrome &&
         (import.meta.env.VITE_PLATFORM === "win32" ||
           import.meta.env.VITE_PLATFORM === "linux") && (
           <AppShell.Header>
@@ -386,6 +431,11 @@ function RootLayout() {
       <AppShell.Main>
         <Outlet />
       </AppShell.Main>
+      {narrow && (
+        <AppShell.Footer withBorder>
+          <SideBar orientation="horizontal" />
+        </AppShell.Footer>
+      )}
     </AppShell>
   );
 }

@@ -35,3 +35,26 @@
 [data-mantine-color-scheme="dark"] .active {
   color: var(--mantine-color-white);
 }
+
+/* Bottom-bar variant, used below the stacked-layout breakpoint. The active marker
+   moves to the top edge because the left border is invisible in a horizontal row. */
+.horizontal {
+  flex: 1;
+  height: 100%;
+  min-width: 0;
+  border-left-color: transparent;
+  border-right-color: transparent;
+  border-top: 3px solid transparent;
+}
+
+.activeHorizontal {
+  border-top-color: var(--mantine-primary-color-filled);
+}
+
+[data-mantine-color-scheme="light"] .activeHorizontal {
+  color: var(--mantine-color-dark-5);
+}
+
+[data-mantine-color-scheme="dark"] .activeHorizontal {
+  color: var(--mantine-color-white);
+}
