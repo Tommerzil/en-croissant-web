@@ -11,7 +11,7 @@ import {
   Tooltip,
   UnstyledButton,
 } from "@mantine/core";
-import { useAtom, useSetAtom, useStore } from "jotai";
+import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai";
 import { useCallback, useEffect, useState } from "react";
 import {
   activeTabAtom,
@@ -19,6 +19,7 @@ import {
   deckAtomFamily,
   type RecentFile,
   recentFilesAtom,
+  referenceDbAtom,
   tabFamily,
   tabsAtom,
 } from "@/state/atoms";
@@ -32,6 +33,7 @@ import {
   IconChess,
   IconClock,
   IconFileImport,
+  IconHistory,
   IconPuzzle,
   IconTarget,
   IconTargetArrow,
@@ -42,6 +44,8 @@ import relativeTime from "dayjs/plugin/relativeTime";
 import { useTranslation } from "react-i18next";
 import { commands } from "@/bindings";
 import { getStats } from "@/components/files/opening";
+import { useActiveDatabaseViewStore } from "@/state/store/database";
+import { getDatabases, type SuccessDatabaseInfo } from "@/utils/db";
 import Chessboard from "../icons/Chessboard";
 import { FileIcon } from "@/components/files/FileIcon";
 
@@ -118,6 +122,10 @@ export default function NewTabHome({ id }: { id: string }) {
   const store = useStore();
   const navigate = useNavigate();
 
+  const referenceDatabase = useAtomValue(referenceDbAtom);
+  const setActiveDatabase = useActiveDatabaseViewStore((s) => s.setDatabase);
+  const clearActiveDatabase = useActiveDatabaseViewStore((s) => s.clearDatabase);
+
   useEffect(() => {
     const checkFiles = async () => {
       const newRecentFiles = await Promise.all(
@@ -179,6 +187,30 @@ export default function NewTabHome({ id }: { id: string }) {
     [setTabs, setActiveTab, store, navigate],
   );
 
+  // Opens the games table of a database: the configured reference database if there is
+  // one, otherwise the only database when just one exists, otherwise the databases page
+  // so the user can pick. The route parameter is the database title, but DatabaseView
+  // renders from the active-database store, so that has to be set before navigating.
+  const openGamesList = useCallback(async () => {
+    const databases = await getDatabases();
+    const usable = databases.filter((db): db is SuccessDatabaseInfo => db.type === "success");
+    const target =
+      usable.find((db) => db.file === referenceDatabase) ??
+      (usable.length === 1 ? usable[0] : undefined);
+
+    if (!target) {
+      clearActiveDatabase();
+      await navigate({ to: "/databases" });
+      return;
+    }
+
+    setActiveDatabase(target);
+    await navigate({
+      to: "/databases/$databaseId",
+      params: { databaseId: target.title },
+    });
+  }, [referenceDatabase, setActiveDatabase, clearActiveDatabase, navigate]);
+
   const cards = [
     {
       icon: <IconChess size={60} />,
@@ -209,6 +241,16 @@ export default function NewTabHome({ id }: { id: string }) {
           return [...prev];
         });
       },
+    },
+    {
+      icon: <IconHistory size={60} />,
+      title: t("Common.Games"),
+      // Intentionally untranslated: adding a new key to all 16 locale files is
+      // disproportionate for one card, and a key present in only en-US would render
+      // raw for every other language.
+      description: "Browse the games in your database, newest first",
+      label: t("Databases.Settings.Explore"),
+      onClick: openGamesList,
     },
     {
       icon: <IconTargetArrow size={60} />,
