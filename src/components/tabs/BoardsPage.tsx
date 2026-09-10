@@ -1,9 +1,9 @@
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import { ActionIcon, ScrollArea, Tabs } from "@mantine/core";
-import { useHotkeys, useToggle } from "@mantine/hooks";
+import { useHotkeys, useMediaQuery, useToggle } from "@mantine/hooks";
 import { IconPlus } from "@tabler/icons-react";
 import { useAtom, useAtomValue } from "jotai";
-import { type ReactNode, startTransition, useCallback, useEffect } from "react";
+import { Fragment, type ReactNode, startTransition, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Mosaic, type MosaicNode } from "react-mosaic-component";
 import { match } from "ts-pattern";
@@ -11,6 +11,7 @@ import { commands } from "@/bindings";
 import { activeTabAtom, tabsAtom } from "@/state/atoms";
 import { keyMapAtom } from "@/state/keybinds";
 import { createTab, genID, isPersistentGameOrigin, type Tab } from "@/utils/tabs";
+import { STACKED_LAYOUT_QUERY } from "@/utils/breakpoints";
 import { unwrap } from "@/utils/unwrap";
 import BoardAnalysis from "../boards/BoardAnalysis";
 import BoardGame from "../boards/BoardGame";
@@ -288,6 +289,47 @@ const windowsStateAtom = atomWithStorage<WindowsState>("windowsState", {
   },
 });
 
+/**
+ * Renders the three board panes and the board component that portals into them.
+ *
+ * Both branches use the same pane ids, so `BoardAnalysis`/`BoardGame` need no
+ * changes. Two things are deliberate:
+ *
+ * - The stacked branch never touches `windowsState`. That atom is persisted on the
+ *   server and shared with the desktop session, so a phone must not rewrite the
+ *   layout the laptop is using.
+ * - `children` sits inside the keyed Fragment. Mantine's Portal resolves its target
+ *   element once, in a mount effect, so when crossing the breakpoint (rotating a
+ *   phone does cross it) the consumers have to remount or they keep portaling into
+ *   a detached div and the board disappears.
+ */
+function BoardLayout({ children }: { children: ReactNode }) {
+  const [windowsState, setWindowsState] = useAtom(windowsStateAtom);
+  const stacked = useMediaQuery(STACKED_LAYOUT_QUERY, false, {
+    getInitialValueInEffect: false,
+  });
+
+  return (
+    <Fragment key={stacked ? "stacked" : "mosaic"}>
+      {stacked ? (
+        <div className={classes.stacked}>
+          <div id="left" className={classes.stackedBoard} />
+          <div id="bottomRight" className={classes.stackedNotation} />
+          <div id="topRight" className={classes.stackedPanel} />
+        </div>
+      ) : (
+        <Mosaic<ViewId>
+          renderTile={(id) => fullLayout[id]}
+          value={windowsState.currentNode}
+          onChange={(currentNode) => setWindowsState({ currentNode })}
+          resize={{ minimumPaneSizePercentage: 0 }}
+        />
+      )}
+      {children}
+    </Fragment>
+  );
+}
+
 function TabSwitch({
   tab,
   saveModalOpened,
@@ -301,46 +343,32 @@ function TabSwitch({
   closeTab: (value: string | null, forced?: boolean) => void;
   activeTab: string | null;
 }) {
-  const [windowsState, setWindowsState] = useAtom(windowsStateAtom);
-
   return match(tab.type)
     .with("new", () => <NewTabHome id={tab.value} />)
     .with("play", () => (
       <TreeStateProvider id={tab.value}>
-        <Mosaic<ViewId>
-          renderTile={(id) => fullLayout[id]}
-          value={windowsState.currentNode}
-          onChange={(currentNode) => setWindowsState({ currentNode })}
-          resize={{ minimumPaneSizePercentage: 0 }}
-        />
-        <BoardGame />
+        <BoardLayout>
+          <BoardGame />
+        </BoardLayout>
       </TreeStateProvider>
     ))
     .with("analysis", () => (
       <TreeStateProvider id={tab.value}>
-        <Mosaic<ViewId>
-          renderTile={(id) => fullLayout[id]}
-          value={windowsState.currentNode}
-          onChange={(currentNode) => setWindowsState({ currentNode })}
-          resize={{ minimumPaneSizePercentage: 0 }}
-        />
-        <BoardAnalysis />
-        <ConfirmChangesModal
-          opened={saveModalOpened}
-          toggle={toggleSaveModal}
-          closeTab={() => closeTab(activeTab, true)}
-        />
+        <BoardLayout>
+          <BoardAnalysis />
+          <ConfirmChangesModal
+            opened={saveModalOpened}
+            toggle={toggleSaveModal}
+            closeTab={() => closeTab(activeTab, true)}
+          />
+        </BoardLayout>
       </TreeStateProvider>
     ))
     .with("puzzles", () => (
       <TreeStateProvider id={tab.value}>
-        <Mosaic<ViewId>
-          renderTile={(id) => fullLayout[id]}
-          value={windowsState.currentNode}
-          onChange={(currentNode) => setWindowsState({ currentNode })}
-          resize={{ minimumPaneSizePercentage: 0 }}
-        />
-        <Puzzles id={tab.value} />
+        <BoardLayout>
+          <Puzzles id={tab.value} />
+        </BoardLayout>
       </TreeStateProvider>
     ))
     .exhaustive();
