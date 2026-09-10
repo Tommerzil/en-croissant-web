@@ -125,6 +125,7 @@ export default function NewTabHome({ id }: { id: string }) {
   const referenceDatabase = useAtomValue(referenceDbAtom);
   const setActiveDatabase = useActiveDatabaseViewStore((s) => s.setDatabase);
   const clearActiveDatabase = useActiveDatabaseViewStore((s) => s.clearDatabase);
+  const setDatabaseViewTab = useActiveDatabaseViewStore((s) => s.setActiveTab);
 
   useEffect(() => {
     const checkFiles = async () => {
@@ -205,11 +206,15 @@ export default function NewTabHome({ id }: { id: string }) {
     }
 
     setActiveDatabase(target);
+    // `setDatabase` resets the three queries but not `activeTab`, and that store is
+    // persisted: a user whose last visit ended on Players or Tournaments would land
+    // there instead of on the games list this card promises.
+    setDatabaseViewTab("games");
     await navigate({
       to: "/databases/$databaseId",
       params: { databaseId: target.title },
     });
-  }, [referenceDatabase, setActiveDatabase, clearActiveDatabase, navigate]);
+  }, [referenceDatabase, setActiveDatabase, clearActiveDatabase, setDatabaseViewTab, navigate]);
 
   const cards = [
     {
