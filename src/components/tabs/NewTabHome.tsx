@@ -11,6 +11,7 @@ import {
   Tooltip,
   UnstyledButton,
 } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -37,8 +38,10 @@ import {
   IconPuzzle,
   IconTarget,
   IconTargetArrow,
+  IconX,
 } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
+import { error } from "@tauri-apps/plugin-log";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { useTranslation } from "react-i18next";
@@ -193,7 +196,22 @@ export default function NewTabHome({ id }: { id: string }) {
   // so the user can pick. The route parameter is the database title, but DatabaseView
   // renders from the active-database store, so that has to be set before navigating.
   const openGamesList = useCallback(async () => {
-    const databases = await getDatabases();
+    let databases: Awaited<ReturnType<typeof getDatabases>>;
+    try {
+      databases = await getDatabases();
+    } catch (e) {
+      // Without this the card just did nothing when listing failed. Say so and fall
+      // back to the databases page, which shows the same failure in context.
+      error(`Failed to list databases: ${e}`);
+      notifications.show({
+        title: "Could not open the games list",
+        message: "The databases could not be listed.",
+        color: "red",
+        icon: <IconX />,
+      });
+      await navigate({ to: "/databases" });
+      return;
+    }
     const usable = databases.filter((db): db is SuccessDatabaseInfo => db.type === "success");
     const target =
       usable.find((db) => db.file === referenceDatabase) ??
