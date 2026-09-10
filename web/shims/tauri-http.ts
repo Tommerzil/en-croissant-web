@@ -1,9 +1,13 @@
+// Must stay in step with ALLOWED_HOSTS in server/src/proxy.rs: a host missing
+// here falls through to a native fetch instead of the proxy. The Lichess
+// opening explorer and tablebase are `.org` (src/utils/lichess/api.tsx, and
+// Lichess's own OpenAPI spec); the legacy `.ovh` aliases are not used.
 const PROXIED_HOSTS = new Set([
     "api.chess.com",
     "www.chess.com",
     "lichess.org",
-    "explorer.lichess.ovh",
-    "tablebase.lichess.ovh",
+    "explorer.lichess.org",
+    "tablebase.lichess.org",
     "www.chessdb.cn",
 ]);
 

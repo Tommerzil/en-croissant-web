@@ -19,13 +19,21 @@ use crate::app::App;
 /// `https://api.chess.com/...` that happened to carry a Lichess token would
 /// hand that token to chess.com. Lichess is the only allowlisted operator whose
 /// API takes a bearer token, and only its account-scoped hosts need one --
-/// `tablebase.lichess.ovh` is wholly public -- so those two alone get it.
+/// `tablebase.lichess.org` is wholly public (`security: []` in Lichess's own
+/// OpenAPI spec, against `OAuth2` on all three opening-explorer endpoints) --
+/// so those two alone get it.
+///
+/// Every entry must be a host the frontend actually calls: an allowlisted host
+/// is somewhere a request, and possibly a bearer token, can be sent. Lichess
+/// also answers on the legacy `explorer.lichess.ovh` / `tablebase.lichess.ovh`
+/// aliases (same CNAME targets, `bookd`/`bwrdd.lichess.ovh`), but the frontend
+/// and the spec both use `.org`, so the aliases are deliberately absent.
 const ALLOWED_HOSTS: &[(&str, bool)] = &[
     ("api.chess.com", false),
     ("www.chess.com", false),
     ("lichess.org", true),
-    ("explorer.lichess.ovh", true),
-    ("tablebase.lichess.ovh", false),
+    ("explorer.lichess.org", true),
+    ("tablebase.lichess.org", false),
     ("www.chessdb.cn", false),
 ];
 

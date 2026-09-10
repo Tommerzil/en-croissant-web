@@ -5,7 +5,20 @@ fn allowlist() {
     use chess_server::proxy::is_allowed;
     assert!(is_allowed("https://api.chess.com/pub/player/x/games/2024/01"));
     assert!(is_allowed("https://www.chess.com/callback/live/game/1"));
-    assert!(is_allowed("https://explorer.lichess.ovh/masters?fen=x"));
+    assert!(is_allowed("https://lichess.org/api/account"));
+    // Every endpoint src/utils/lichess/api.tsx actually calls. The hostnames are
+    // `.org`, matching Lichess's OpenAPI spec ("The hostname for these endpoints
+    // is `explorer.lichess.org`" / "`tablebase.lichess.org`").
+    assert!(is_allowed("https://explorer.lichess.org/masters?fen=x"));
+    assert!(is_allowed("https://explorer.lichess.org/lichess?fen=x"));
+    assert!(is_allowed("https://explorer.lichess.org/player?fen=x&player=y&color=white"));
+    assert!(is_allowed("https://tablebase.lichess.org/standard?fen=x"));
+    // Regression guard: `.ovh` is a legacy alias of the same backends that the
+    // frontend never calls, so it is deliberately not allowlisted. These once
+    // stood in for the `.org` names, which left the explorer and the tablebase
+    // matching no proxy rule at all.
+    assert!(!is_allowed("https://explorer.lichess.ovh/masters?fen=x"));
+    assert!(!is_allowed("https://tablebase.lichess.ovh/standard?fen=x"));
     // chessdb cloud evaluation (analysis board).
     assert!(is_allowed("https://www.chessdb.cn/cdb.php?action=queryall&board=x&json=1"));
     // The allowlist is exact: the bare apex is not the same host as www.
@@ -36,8 +49,12 @@ fn client_is_shared() {
 #[tokio::test]
 async fn disallowed_host_is_403() {
     let s = common::spawn().await;
-    let r = reqwest::get(format!("{}/api/proxy?url=https://example.com/", s.base_url)).await.unwrap();
-    assert_eq!(r.status(), 403);
+    // `example.com` is refused before any network I/O; so is the `.ovh`
+    // explorer alias, which is what the whole allowlist used to name.
+    for url in ["https://example.com/", "https://explorer.lichess.ovh/masters?fen=x"] {
+        let r = reqwest::get(format!("{}/api/proxy?url={url}", s.base_url)).await.unwrap();
+        assert_eq!(r.status(), 403, "{url} should be refused");
+    }
 }
 
 /// The `Authorization` flag on the allowlist: Lichess's account-scoped hosts
@@ -47,13 +64,20 @@ async fn disallowed_host_is_403() {
 fn authorization_scope() {
     use chess_server::proxy::forwards_authorization;
     assert!(forwards_authorization("https://lichess.org/api/account"));
-    assert!(forwards_authorization("https://explorer.lichess.ovh/player?fen=x"));
+    // All three opening-explorer endpoints are `security: - OAuth2: []` in
+    // Lichess's spec, and each takes an optional token in api.tsx.
+    assert!(forwards_authorization("https://explorer.lichess.org/masters?fen=x"));
+    assert!(forwards_authorization("https://explorer.lichess.org/lichess?fen=x"));
+    assert!(forwards_authorization("https://explorer.lichess.org/player?fen=x"));
     // Public endpoints of other operators: no credential has any business here.
     assert!(!forwards_authorization("https://api.chess.com/pub/player/x"));
     assert!(!forwards_authorization("https://www.chess.com/callback/live/game/1"));
     assert!(!forwards_authorization("https://www.chessdb.cn/cdb.php"));
-    // Lichess-operated, but the tablebase API is wholly public.
-    assert!(!forwards_authorization("https://tablebase.lichess.ovh/standard?fen=x"));
+    // Lichess-operated, but the tablebase API is wholly public (`security: []`).
+    assert!(!forwards_authorization("https://tablebase.lichess.org/standard?fen=x"));
+    // Not allowlisted at all, so no credential either -- including the `.ovh`
+    // alias that used to stand in for the explorer host.
+    assert!(!forwards_authorization("https://explorer.lichess.ovh/player?fen=x"));
     // A URL the proxy would refuse outright never forwards a credential either,
     // so the flag cannot widen the allowlist.
     assert!(!forwards_authorization("https://evil.example/"));
@@ -74,7 +98,12 @@ fn upstream_headers(url: &str) -> reqwest::header::HeaderMap {
 
 #[test]
 fn authorization_is_forwarded_to_lichess() {
-    for url in ["https://lichess.org/api/account", "https://explorer.lichess.ovh/player?fen=x"] {
+    for url in [
+        "https://lichess.org/api/account",
+        "https://explorer.lichess.org/masters?fen=x",
+        "https://explorer.lichess.org/lichess?fen=x",
+        "https://explorer.lichess.org/player?fen=x&player=y&color=white",
+    ] {
         let sent = upstream_headers(url);
         assert_eq!(
             sent.get(reqwest::header::AUTHORIZATION).map(|v| v.as_bytes()),
@@ -98,7 +127,7 @@ fn authorization_is_dropped_for_other_hosts() {
         "https://api.chess.com/pub/player/x/games/archives",
         "https://www.chess.com/callback/live/game/1",
         "https://www.chessdb.cn/cdb.php?action=queryall&board=x&json=1",
-        "https://tablebase.lichess.ovh/standard?fen=x",
+        "https://tablebase.lichess.org/standard?fen=x",
     ] {
         let sent = upstream_headers(url);
         assert!(
