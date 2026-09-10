@@ -245,14 +245,9 @@ export default function NewTabHome({ id }: { id: string }) {
     },
   ];
 
-  // Play-versus-engine and puzzle training are out of scope for the web build.
+  // Puzzle training is out of scope for the web build; play-versus-engine is not.
   const visibleCards = cards.filter(
-    (card) =>
-      !(
-        isWeb &&
-        (card.title === t("Home.Card.PlayChess.Title") ||
-          card.title === t("Home.Card.Puzzle.Title"))
-      ),
+    (card) => !(isWeb && card.title === t("Home.Card.Puzzle.Title")),
   );
 
   return (
