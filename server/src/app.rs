@@ -45,10 +45,27 @@ impl App {
         self.last_seen.insert(tab.to_string(), Instant::now());
     }
 
-    /// Called by every route that names a game, so an abandoned one can be told apart
-    /// from one whose player is simply thinking.
+    /// Register a game as reapable. Only `start_game` does this, once the game exists:
+    /// everything else refreshes, so an id that never named a live game leaves nothing
+    /// behind.
     pub fn touch_game(&self, game_id: &str) {
         self.games_last_seen.insert(game_id.to_string(), Instant::now());
+    }
+
+    /// Mark a game as still alive, so an abandoned one can be told apart from one whose
+    /// player is simply thinking. Deliberately does not insert: a POST carrying a
+    /// made-up game id, or a move event that races `start_game`'s registration, must not
+    /// create an entry the reaper then sweeps for ten minutes. A game the server has
+    /// forgotten cannot be kept alive by refreshing it either.
+    pub fn refresh_game(&self, game_id: &str) {
+        if let Some(mut seen) = self.games_last_seen.get_mut(game_id) {
+            *seen = Instant::now();
+        }
+    }
+
+    /// Drop a game's stamp, for the paths that end a game outright.
+    pub fn forget_game(&self, game_id: &str) {
+        self.games_last_seen.remove(game_id);
     }
 }
 

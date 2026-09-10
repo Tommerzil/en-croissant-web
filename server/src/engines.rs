@@ -3,6 +3,9 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use en_croissant::chess::{kill_engine, kill_engines};
+use en_croissant::ctx::WebEvent;
+use en_croissant::game::{GameEndReason, GameMoveEvent, GameOverEvent, GameResult, GameStatus};
+use tokio::sync::broadcast::error::RecvError;
 
 use crate::app::App;
 
@@ -55,11 +58,19 @@ pub fn spawn_reaper(app: App, idle: Duration, tick: Duration) {
     });
 }
 
-/// End games that have not seen a command within `idle`, releasing the engines they
-/// hold. A game spawns its own pair of engines, kept by the `GameManager` and not in
-/// `engine_processes`, so `spawn_reaper` above never sees them; nothing else removes a
-/// game either, so without this a user who opens a few games and walks away leaves an
+/// End games that nobody is watching and nothing is happening in, releasing the engines
+/// they hold. A game spawns its own pair of engines, kept by the `GameManager` and not
+/// in `engine_processes`, so `spawn_reaper` above never sees them; nothing else removes
+/// a game either, so without this a user who opens a few games and walks away leaves an
 /// engine process per engine per game id running until the server exits.
+///
+/// "Abandoned" takes two things, not one. A stale timestamp alone is not enough: the
+/// frontend fetches a game's state once and then listens for events, so an
+/// engine-versus-engine game issues no command at all after `start_game`, and a human
+/// thinking through a slow time control issues none either. Both are live games. So a
+/// game is only reaped when there is no client attached *and* its stamp is stale --
+/// and `spawn_game_activity_watcher` keeps the stamp fresh while moves are being
+/// played, which is what makes the second half of that test mean anything.
 pub fn spawn_game_reaper(app: App, idle: Duration, tick: Duration) {
     tokio::spawn(async move {
         loop {
@@ -69,6 +80,12 @@ pub fn spawn_game_reaper(app: App, idle: Duration, tick: Duration) {
             // those awaits -- the ids are snapshotted first, which drops the DashMap
             // shard read locks. See `App::reap_lock`.
             let _g = app.reap_lock.lock().await;
+            // A game with a browser attached is by definition not abandoned. When the
+            // last socket closes, `on_client_disconnect` kills the analysis engines and
+            // this sweep starts applying to games again.
+            if app.clients.load(Ordering::SeqCst) > 0 {
+                continue;
+            }
             let now = Instant::now();
             let stale: Vec<String> = app
                 .games_last_seen
@@ -78,13 +95,82 @@ pub fn spawn_game_reaper(app: App, idle: Duration, tick: Duration) {
                 .collect();
             for game_id in stale {
                 log::info!("reaping abandoned game {game_id}");
+                // Read the game before tearing it down: `abort_game` drops it, and the
+                // client is owed a game-over event rather than a board that silently
+                // freezes and errors on its next move. A game already finished has had
+                // its event; one already gone has nothing to report.
+                let ending = app
+                    .ctx
+                    .state
+                    .game_manager
+                    .get_game_state(&game_id)
+                    .await
+                    .ok()
+                    .filter(|s| s.status == GameStatus::Playing);
                 // The teardown the abort_game command already uses: shut the game loop
                 // down and quit both engines. A game that has gone already -- aborted,
                 // or replaced by a restart under the same id -- is a no-op.
                 if let Err(e) = app.ctx.state.game_manager.abort_game(&game_id).await {
                     log::warn!("abort_game failed: {e}");
                 }
-                app.games_last_seen.remove(&game_id);
+                if let Some(state) = ending {
+                    // The convention the game loop already uses when a game ends because
+                    // one side stopped playing: whoever was to move forfeits.
+                    let reason = GameEndReason::Abandonment;
+                    let result = if state.turn == "white" {
+                        GameResult::BlackWins { reason }
+                    } else {
+                        GameResult::WhiteWins { reason }
+                    };
+                    let _ = GameOverEvent {
+                        game_id: game_id.clone(),
+                        result,
+                        moves: state.moves,
+                    }
+                    .emit(&app.ctx);
+                }
+                app.forget_game(&game_id);
+            }
+        }
+    });
+}
+
+/// Refresh a game's idle stamp whenever the game itself plays a move, so a game that is
+/// being played is never mistaken for one that was walked away from.
+///
+/// The HTTP handlers cannot carry this on their own: an engine-versus-engine game sends
+/// no commands once it has started, and the frontend only ever fetches a game's state
+/// once before switching to events. The server watches the game's own move events
+/// rather than `game.rs` reaching into the server's map: those events already flow
+/// through `ServerCtx::events` (`ws.rs` subscribes to the same broadcast), so the shared
+/// game module keeps no knowledge of server bookkeeping, nothing is plumbed through
+/// `AppCtx`, and the refresh is one DashMap write with no guard held across an await.
+///
+/// Only `game-move-event` counts as activity. A clocked game broadcasts
+/// `clock-update-event` ten times a second whether or not anyone is playing it, so
+/// counting those would make every timed game unreapable.
+pub fn spawn_game_activity_watcher(app: App) {
+    let mut events = app.ctx.events.subscribe();
+    tokio::spawn(async move {
+        loop {
+            match events.recv().await {
+                Ok(envelope) => {
+                    if envelope.event != GameMoveEvent::NAME {
+                        continue;
+                    }
+                    if let Some(id) = envelope.payload.get("gameId").and_then(|v| v.as_str()) {
+                        // `refresh_game`, not `touch_game`: a game's first move event can
+                        // beat `start_game`'s registration, and the no-op refresh that
+                        // results is correct -- the insert follows a moment later. Making
+                        // this insert would also let an event for an already-reaped game
+                        // resurrect its entry.
+                        app.refresh_game(id);
+                    }
+                }
+                Err(RecvError::Lagged(n)) => {
+                    log::warn!("game activity watcher lagged, dropped {n} events");
+                }
+                Err(RecvError::Closed) => break,
             }
         }
     });

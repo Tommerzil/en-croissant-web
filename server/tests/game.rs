@@ -1,7 +1,9 @@
 mod common;
 
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use en_croissant::game::GameStatus;
 use futures_util::StreamExt;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -13,6 +15,17 @@ fn install_stub(s: &common::TestServer) -> String {
     let dst = s.data_dir.path().join("engines/stub.sh");
     std::fs::copy(&src, &dst).unwrap();
     "/engines/stub.sh".to_string()
+}
+
+/// An engine that plays a real line instead of answering `e2e4` to everything, so an
+/// engine-versus-engine game keeps going rather than ending on ply 2 with an illegal
+/// move. Paces itself at roughly ten plies a second.
+fn install_replay(s: &common::TestServer) -> String {
+    let src =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/replay_engine.sh");
+    let dst = s.data_dir.path().join("engines/replay.sh");
+    std::fs::copy(&src, &dst).unwrap();
+    "/engines/replay.sh".to_string()
 }
 
 fn engine_player(path: &str) -> serde_json::Value {
@@ -355,4 +368,172 @@ async fn a_game_that_keeps_answering_commands_is_not_reaped() {
         assert_eq!(r.status(), 200, "a game answering commands must not be reaped");
     }
     common::cmd(&s, "abort_game", serde_json::json!({ "gameId": "active" })).await;
+}
+
+/// A browser is attached, and the game sends nothing: no commands, no moves. This is a
+/// human thinking through a slow time control, and the timestamps on their own would
+/// call it abandoned after ten minutes and abort it with the clock still running.
+/// Nothing here is observed over HTTP -- every game route refreshes the stamp, so a
+/// polling assertion would keep the game alive by asking about it.
+#[tokio::test]
+async fn a_game_with_a_client_connected_is_not_reaped() {
+    let s = common::spawn().await;
+    let r = common::cmd(
+        &s,
+        "start_game",
+        serde_json::json!({
+            "gameId": "watched",
+            "config": game_config(human_player(), human_player()),
+        }),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+
+    // Held for the rest of the test: dropping the stream closes the socket.
+    let (_ws, _) = connect_async(&s.ws_url).await.unwrap();
+    // The upgrade callback runs after the handshake response, so the count lags the
+    // connect; the reaper must not start before the client is registered.
+    let mut connected = false;
+    for _ in 0..100 {
+        if s.app.clients.load(Ordering::SeqCst) == 1 {
+            connected = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(connected, "the event socket never registered");
+
+    chess_server::engines::spawn_game_reaper(
+        s.app.clone(),
+        Duration::from_millis(200),
+        Duration::from_millis(50),
+    );
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    assert!(
+        s.app.games_last_seen.contains_key("watched"),
+        "a game with a client attached must not be reaped"
+    );
+    assert!(
+        s.app.ctx.state.game_manager.get_game_state("watched").await.is_ok(),
+        "the watched game was torn down"
+    );
+    common::cmd(&s, "abort_game", serde_json::json!({ "gameId": "watched" })).await;
+}
+
+/// An engine-versus-engine game issues no commands at all after `start_game` -- the
+/// frontend fetches the state once and then listens for events -- so the only thing
+/// that can keep it alive is `spawn_game_activity_watcher` seeing its own moves. No
+/// socket is opened, so the client gate cannot be what saves it either.
+#[tokio::test]
+async fn an_engine_versus_engine_game_making_moves_is_not_reaped() {
+    let s = common::spawn().await;
+    let engine = install_replay(&s);
+    let r = common::cmd(
+        &s,
+        "start_game",
+        serde_json::json!({
+            "gameId": "selfplay",
+            "config": game_config(engine_player(&engine), engine_player(&engine)),
+        }),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+
+    // Wait for the game to be under way before arming the reaper, so engine startup is
+    // not mistaken for idleness. Read the manager directly: the HTTP route would touch
+    // the stamp and hide what is being tested.
+    let mut moving = false;
+    for _ in 0..100 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        if let Ok(state) = s.app.ctx.state.game_manager.get_game_state("selfplay").await {
+            if state.ply >= 2 {
+                moving = true;
+                break;
+            }
+        }
+    }
+    assert!(moving, "the engines never started playing");
+    let ply_before = s
+        .app
+        .ctx
+        .state
+        .game_manager
+        .get_game_state("selfplay")
+        .await
+        .unwrap()
+        .ply;
+
+    chess_server::engines::spawn_game_reaper(
+        s.app.clone(),
+        Duration::from_millis(300),
+        Duration::from_millis(50),
+    );
+    tokio::time::sleep(Duration::from_millis(900)).await;
+
+    assert!(
+        s.app.games_last_seen.contains_key("selfplay"),
+        "a game that is still playing must not be reaped"
+    );
+    let state = s
+        .app
+        .ctx
+        .state
+        .game_manager
+        .get_game_state("selfplay")
+        .await
+        .expect("the playing game was torn down");
+    assert_eq!(
+        state.status,
+        GameStatus::Playing,
+        "the fixture's line ran out; the window is longer than the line is"
+    );
+    assert!(
+        state.ply > ply_before,
+        "the game stopped moving: ply {} then {}",
+        ply_before,
+        state.ply
+    );
+
+    common::cmd(&s, "abort_game", serde_json::json!({ "gameId": "selfplay" })).await;
+}
+
+/// The reaper's teardown is announced. Without this the board just freezes and the
+/// player finds out on their next move, which comes back as an error. Watched through
+/// the broadcast rather than a WebSocket, because an open socket would (correctly) stop
+/// the reaper from running at all.
+#[tokio::test]
+async fn a_reaped_game_announces_that_it_ended() {
+    let s = common::spawn().await;
+    let engine = install_stub(&s);
+    let mut events = s.app.ctx.events.subscribe();
+    let r = common::cmd(
+        &s,
+        "start_game",
+        serde_json::json!({
+            "gameId": "announced",
+            "config": game_config(engine_player(&engine), human_player()),
+        }),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+
+    chess_server::engines::spawn_game_reaper(
+        s.app.clone(),
+        Duration::from_millis(200),
+        Duration::from_millis(50),
+    );
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut over = None;
+    while let Ok(Ok(envelope)) = tokio::time::timeout_at(deadline, events.recv()).await {
+        if envelope.event == "game-over-event" && envelope.payload["gameId"] == "announced" {
+            over = Some(envelope.payload);
+            break;
+        }
+    }
+    let over = over.expect("no game-over-event for the reaped game");
+    // White is the engine and moved first, so black is to move and forfeits.
+    assert_eq!(over["result"]["type"], "whiteWins");
+    assert_eq!(over["result"]["reason"], "abandonment");
 }

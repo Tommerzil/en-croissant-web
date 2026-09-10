@@ -68,6 +68,8 @@ pub fn build_app(config: &Config) -> Result<App, String> {
     engines::spawn_reaper(app.clone(), engines::IDLE_LIMIT, Duration::from_secs(30));
     // Same idle limit: a game's engines are as expensive as an analysis engine's.
     engines::spawn_game_reaper(app.clone(), engines::IDLE_LIMIT, Duration::from_secs(30));
+    // Feeds the reaper above: without it a game that plays itself looks idle.
+    engines::spawn_game_activity_watcher(app.clone());
     Ok(app)
 }
 
