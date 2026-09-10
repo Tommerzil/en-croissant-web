@@ -64,13 +64,24 @@ pub fn spawn_reaper(app: App, idle: Duration, tick: Duration) {
 /// a game either, so without this a user who opens a few games and walks away leaves an
 /// engine process per engine per game id running until the server exits.
 ///
-/// "Abandoned" takes two things, not one. A stale timestamp alone is not enough: the
-/// frontend fetches a game's state once and then listens for events, so an
-/// engine-versus-engine game issues no command at all after `start_game`, and a human
-/// thinking through a slow time control issues none either. Both are live games. So a
-/// game is only reaped when there is no client attached *and* its stamp is stale --
-/// and `spawn_game_activity_watcher` keeps the stamp fresh while moves are being
-/// played, which is what makes the second half of that test mean anything.
+/// A game still *in progress* takes two things to count as abandoned, not one. A stale
+/// timestamp alone is not enough: the frontend fetches a game's state once and then
+/// listens for events, so an engine-versus-engine game issues no command at all after
+/// `start_game`, and a human thinking through a slow time control issues none either.
+/// Both are live games. So a game that is being played is only reaped when there is no
+/// client attached *and* its stamp is stale -- and `spawn_game_activity_watcher` keeps
+/// the stamp fresh while moves are being played, which is what makes the second half of
+/// that test mean anything.
+///
+/// A game that has *finished* -- resigned, mated, timed out -- needs no such gate:
+/// nobody is playing it, and no reconnecting browser is going to resume it. Its loop has
+/// already exited and told both engines to quit, but the children stay unreaped until
+/// the controller drops, and only this sweep drops it. Gating those on the client count
+/// meant a user playing several games in one sitting accumulated a defunct process per
+/// engine until the last tab closed, so finished games are cleaned up on the ordinary
+/// idle schedule whoever is connected. They get no game-over event on the way out: they
+/// already announced their real result, and a second, contradicting one would be worse
+/// than none.
 pub fn spawn_game_reaper(app: App, idle: Duration, tick: Duration) {
     tokio::spawn(async move {
         loop {
@@ -80,12 +91,6 @@ pub fn spawn_game_reaper(app: App, idle: Duration, tick: Duration) {
             // those awaits -- the ids are snapshotted first, which drops the DashMap
             // shard read locks. See `App::reap_lock`.
             let _g = app.reap_lock.lock().await;
-            // A game with a browser attached is by definition not abandoned. When the
-            // last socket closes, `on_client_disconnect` kills the analysis engines and
-            // this sweep starts applying to games again.
-            if app.clients.load(Ordering::SeqCst) > 0 {
-                continue;
-            }
             let now = Instant::now();
             let stale: Vec<String> = app
                 .games_last_seen
@@ -94,26 +99,41 @@ pub fn spawn_game_reaper(app: App, idle: Duration, tick: Duration) {
                 .map(|e| e.key().clone())
                 .collect();
             for game_id in stale {
-                log::info!("reaping abandoned game {game_id}");
-                // Read the game before tearing it down: `abort_game` drops it, and the
-                // client is owed a game-over event rather than a board that silently
-                // freezes and errors on its next move. A game already finished has had
-                // its event; one already gone has nothing to report.
-                let ending = app
+                // Read the game before deciding anything: the client gate applies to it
+                // only if it is still being played, and `abort_game` drops it, so the
+                // state a game-over event would be built from has to be taken first. A
+                // game already gone -- aborted, or restarted under the same id -- reads
+                // as an error and has nothing to report.
+                let state = app
                     .ctx
                     .state
                     .game_manager
                     .get_game_state(&game_id)
                     .await
-                    .ok()
-                    .filter(|s| s.status == GameStatus::Playing);
+                    .ok();
+                let in_progress = matches!(&state, Some(s) if s.status == GameStatus::Playing);
+                // A game being played with a browser attached is by definition not
+                // abandoned. When the last socket closes, `on_client_disconnect` kills
+                // the analysis engines and this sweep starts applying to it again.
+                // Finished games fall through: nobody is playing them.
+                if in_progress && app.clients.load(Ordering::SeqCst) > 0 {
+                    continue;
+                }
+                if in_progress {
+                    log::info!("reaping abandoned game {game_id}");
+                } else {
+                    log::info!("cleaning up finished game {game_id}");
+                }
                 // The teardown the abort_game command already uses: shut the game loop
                 // down and quit both engines. A game that has gone already -- aborted,
                 // or replaced by a restart under the same id -- is a no-op.
                 if let Err(e) = app.ctx.state.game_manager.abort_game(&game_id).await {
                     log::warn!("abort_game failed: {e}");
                 }
-                if let Some(state) = ending {
+                // Only a game that was still being played is owed an event: without one
+                // the board silently freezes and the player finds out on their next
+                // move, which comes back as an error.
+                if let Some(state) = state.filter(|_| in_progress) {
                     // The convention the game loop already uses when a game ends because
                     // one side stopped playing: whoever was to move forfeits.
                     let reason = GameEndReason::Abandonment;
