@@ -7,12 +7,12 @@ describe("http shim", () => {
     it("proxies allowlisted GETs", async () => {
         const f = vi.fn(async () => new Response("{}", { status: 200 }));
         vi.stubGlobal("fetch", f);
-        await httpFetch("https://api.chess.com/pub/player/tommerzil00/games/archives", {
+        await httpFetch("https://api.chess.com/pub/player/examplechessuser/games/archives", {
             method: "GET",
         });
         expect((f.mock.calls[0] as any)[0]).toBe(
             "/api/proxy?url=" +
-                encodeURIComponent("https://api.chess.com/pub/player/tommerzil00/games/archives"),
+                encodeURIComponent("https://api.chess.com/pub/player/examplechessuser/games/archives"),
         );
     });
     it("proxies chessdb cloud evaluation GETs", async () => {
