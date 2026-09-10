@@ -135,6 +135,20 @@ class GenRoutesTest(unittest.TestCase):
         src = g.render_command(by["search_position"])
         self.assertIn("app.touch_tab(&args.tab_id);", src)
 
+    def test_nested_path_types_are_refused(self):
+        # Every type under src-tauri/src that owns a client path, wrappers and leaves
+        # alike. A leaf taken directly -- a future command that configures one player, or
+        # just the opening book -- carries the same client path as the `GameConfig` that
+        # nests it, and must fail the same way: the generator jails whole parameters, so
+        # it cannot reach inside either one. `sample_cmd` is not in SKIP_FNS, so reaching
+        # `classify` at all means the guard, not the skip list, is what refuses it.
+        for ty in ("AnalysisOptions", "GameConfig", "PlayerConfig", "OpeningBookConfig",
+                   "Option<OpeningBookConfig>", "Vec<PlayerConfig>"):
+            with self.subTest(ty=ty):
+                src = ATTR_SAMPLE % f"config: {ty}"
+                with self.assertRaises(SystemExit):
+                    g.parse_commands(src, "game")
+
     def test_unhandled_path_typed_param_fails_closed(self):
         src = ATTR_SAMPLE % "x: Option<PathBuf>"
         with self.assertRaises(SystemExit):

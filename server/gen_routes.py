@@ -42,7 +42,14 @@ TAB_PARAMS = {"tab", "tab_id"}
 # routes_extra.rs (and listed in SKIP_FNS); seeing one here is a bug, not a case to
 # handle. Add a type here whenever a command argument grows a nested path. Matched as a
 # substring of the type, so `Option<GameConfig>` and `Vec<GameConfig>` are caught too.
-NESTED_PATH_TYPES = {"AnalysisOptions", "GameConfig"}
+#
+# List the leaves as well as the wrappers: a future command taking `PlayerConfig` or
+# `OpeningBookConfig` directly carries exactly the same client path as the `GameConfig`
+# that contains them, and would otherwise classify as an ordinary value and ship
+# unjailed. `AnalysisOptions` owns `reference_db`; `PlayerConfig::Engine` owns the
+# engine binary `path`; `OpeningBookConfig` owns the book `path`; `GameConfig` owns all
+# three by nesting the other two.
+NESTED_PATH_TYPES = {"AnalysisOptions", "GameConfig", "PlayerConfig", "OpeningBookConfig"}
 # Parameters that name an engine binary (must resolve under engines/).
 ENGINE_PARAMS = {("get_best_moves", "engine"), ("analyze_game", "engine"), ("get_engine_config", "path")}
 
