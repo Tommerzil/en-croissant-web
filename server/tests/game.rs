@@ -421,6 +421,96 @@ async fn a_game_with_a_client_connected_is_not_reaped() {
     common::cmd(&s, "abort_game", serde_json::json!({ "gameId": "watched" })).await;
 }
 
+/// The other side of that gate. A game that has already ended is not being played by
+/// anybody, so an open browser tab must not keep it -- and the controller holding its
+/// engine children -- alive: the loop has told the engines to quit, but the children are
+/// only reaped when the controller drops, and this sweep is the only thing that drops
+/// it. A user playing several games in one sitting would otherwise pile up a defunct
+/// process per engine until the last tab closed.
+///
+/// Human versus human and resigned over HTTP, so the game is finished at a known moment
+/// with no engine to race. The proof that the leak is closed is the controller being
+/// gone from the manager -- not a process count, since the engine child of a finished
+/// game is a zombie by then and `stub_processes` filters those out.
+#[tokio::test]
+async fn a_finished_game_is_cleaned_up_even_with_a_client_connected() {
+    let s = common::spawn().await;
+    let r = common::cmd(
+        &s,
+        "start_game",
+        serde_json::json!({
+            "gameId": "resigned",
+            "config": game_config(human_player(), human_player()),
+        }),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+
+    let r = common::cmd(
+        &s,
+        "resign_game",
+        serde_json::json!({ "gameId": "resigned", "color": "white" }),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    assert_ne!(
+        s.app.ctx.state.game_manager.get_game_state("resigned").await.unwrap().status,
+        GameStatus::Playing,
+        "the game should have finished"
+    );
+
+    // Subscribed after the resignation, so the real game-over event -- emitted inside
+    // that handler, before it answered -- is not in this receiver. Anything that arrives
+    // from here on is the reaper inventing a second, contradicting result.
+    let mut events = s.app.ctx.events.subscribe();
+
+    // Held for the rest of the test: dropping the stream closes the socket.
+    let (_ws, _) = connect_async(&s.ws_url).await.unwrap();
+    let mut connected = false;
+    for _ in 0..100 {
+        if s.app.clients.load(Ordering::SeqCst) == 1 {
+            connected = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(connected, "the event socket never registered");
+
+    chess_server::engines::spawn_game_reaper(
+        s.app.clone(),
+        Duration::from_millis(200),
+        Duration::from_millis(50),
+    );
+
+    let mut cleaned = false;
+    for _ in 0..60 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        if !s.app.games_last_seen.contains_key("resigned") {
+            cleaned = true;
+            break;
+        }
+    }
+    assert!(cleaned, "a finished game was not cleaned up while a client was connected");
+    assert!(
+        s.app.clients.load(Ordering::SeqCst) == 1,
+        "the socket closed early; the gate was never under test"
+    );
+    assert!(
+        s.app.ctx.state.game_manager.get_game_state("resigned").await.is_err(),
+        "the finished game was forgotten but its controller, and its engines, were kept"
+    );
+
+    // Forgetting the stamp is the sweep's last step, so by now any event this game was
+    // going to get is already in the channel.
+    while let Ok(envelope) = events.try_recv() {
+        assert!(
+            !(envelope.event == "game-over-event" && envelope.payload["gameId"] == "resigned"),
+            "a finished game was given a second game-over event: {}",
+            envelope.payload
+        );
+    }
+}
+
 /// An engine-versus-engine game issues no commands at all after `start_game` -- the
 /// frontend fetches the state once and then listens for events -- so the only thing
 /// that can keep it alive is `spawn_game_activity_watcher` seeing its own moves. No
