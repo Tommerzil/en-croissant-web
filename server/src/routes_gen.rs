@@ -408,6 +408,81 @@ pub async fn get_file_metadata(State(app): State<App>, Json(args): Json<GetFileM
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GetGameStateArgs {
+    pub game_id: String,
+}
+
+pub async fn get_game_state(State(app): State<App>, Json(args): Json<GetGameStateArgs>) -> ApiResult {
+    let out = en_croissant::game::get_game_state(args.game_id, &*app.ctx.state).await?;
+    Ok(Json(serde_json::to_value(out)?))
+}
+
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MakeGameMoveArgs {
+    pub game_id: String,
+    pub uci: String,
+}
+
+pub async fn make_game_move(State(app): State<App>, Json(args): Json<MakeGameMoveArgs>) -> ApiResult {
+    let out = en_croissant::game::make_game_move(args.game_id, args.uci, app.ctx.clone(), &*app.ctx.state).await?;
+    Ok(Json(serde_json::to_value(out)?))
+}
+
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TakeBackGameMoveArgs {
+    pub game_id: String,
+}
+
+pub async fn take_back_game_move(State(app): State<App>, Json(args): Json<TakeBackGameMoveArgs>) -> ApiResult {
+    let out = en_croissant::game::take_back_game_move(args.game_id, app.ctx.clone(), &*app.ctx.state).await?;
+    Ok(Json(serde_json::to_value(out)?))
+}
+
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResignGameArgs {
+    pub game_id: String,
+    pub color: String,
+}
+
+pub async fn resign_game(State(app): State<App>, Json(args): Json<ResignGameArgs>) -> ApiResult {
+    let out = en_croissant::game::resign_game(args.game_id, args.color, app.ctx.clone(), &*app.ctx.state).await?;
+    Ok(Json(serde_json::to_value(out)?))
+}
+
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AbortGameArgs {
+    pub game_id: String,
+}
+
+pub async fn abort_game(State(app): State<App>, Json(args): Json<AbortGameArgs>) -> ApiResult {
+    let out = en_croissant::game::abort_game(args.game_id, &*app.ctx.state).await?;
+    Ok(Json(serde_json::to_value(out)?))
+}
+
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetGameEngineLogsArgs {
+    pub game_id: String,
+    pub color: String,
+}
+
+pub async fn get_game_engine_logs(State(app): State<App>, Json(args): Json<GetGameEngineLogsArgs>) -> ApiResult {
+    let out = en_croissant::game::get_game_engine_logs(args.game_id, args.color, &*app.ctx.state).await?;
+    Ok(Json(serde_json::to_value(out)?))
+}
+
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LexPgnArgs {
     pub pgn: String,
 }
@@ -574,6 +649,12 @@ pub fn router() -> Router<App> {
         .route("/api/cmd/search_position", post(search_position))
         .route("/api/cmd/file_exists", post(file_exists))
         .route("/api/cmd/get_file_metadata", post(get_file_metadata))
+        .route("/api/cmd/get_game_state", post(get_game_state))
+        .route("/api/cmd/make_game_move", post(make_game_move))
+        .route("/api/cmd/take_back_game_move", post(take_back_game_move))
+        .route("/api/cmd/resign_game", post(resign_game))
+        .route("/api/cmd/abort_game", post(abort_game))
+        .route("/api/cmd/get_game_engine_logs", post(get_game_engine_logs))
         .route("/api/cmd/lex_pgn", post(lex_pgn))
         .route("/api/cmd/get_opening_from_fen", post(get_opening_from_fen))
         .route("/api/cmd/get_opening_from_name", post(get_opening_from_name))

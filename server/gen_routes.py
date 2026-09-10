@@ -16,12 +16,14 @@ SRC = Path(__file__).resolve().parent.parent / "src-tauri" / "src"
 OUT = Path(__file__).resolve().parent / "src" / "routes_gen.rs"
 
 # Files compiled only under the `tauri` feature, or with no surviving commands.
-SKIP_FILES = {"main.rs", "lib.rs", "ctx.rs", "game.rs", "oauth.rs", "puzzle.rs", "sound.rs"}
-# Commands gated with #[cfg(feature = "tauri")] or replaced by hand-written routes
-# (analyze_game: its `options.reference_db` is a nested client path that must be jailed).
+SKIP_FILES = {"main.rs", "lib.rs", "ctx.rs", "oauth.rs", "puzzle.rs", "sound.rs"}
+# Commands gated with #[cfg(feature = "tauri")] or replaced by hand-written routes.
+# Hand-written because a client path is nested inside a struct argument, which the
+# generator cannot jail: analyze_game (`options.reference_db`) and start_game
+# (`config.white`/`config.black` engine binaries and `config.openingBook.path`).
 SKIP_FNS = {"download_file", "set_file_as_executable", "close_splashscreen",
             "memory_size", "is_bmi2_compatible", "get_sound_server_port", "authenticate",
-            "analyze_game"}
+            "analyze_game", "start_game"}
 # Commands whose future only completes when the engine process exits. They are run in a
 # detached task; the handler returns the early result if it arrives within the grace period.
 SPAWN_FNS = {"get_best_moves"}
@@ -35,6 +37,11 @@ NON_PATH_STRINGS: set[tuple[str, str]] = set()
 PATHY_NAME_RE = re.compile(r"(^|_)(path|file|dir|db|database|destination)(_|$)")
 # Parameters that carry the client's tab id (drive the idle reaper's last_seen map).
 TAB_PARAMS = {"tab", "tab_id"}
+# Struct arguments with a client path somewhere in their fields. The generator jails
+# whole parameters, not fields, so a command taking one must be hand-written in
+# routes_extra.rs (and listed in SKIP_FNS); seeing one here is a bug, not a case to
+# handle. Add a type here whenever a command argument grows a nested path.
+NESTED_PATH_TYPES = {"AnalysisOptions", "GameConfig"}
 # Parameters that name an engine binary (must resolve under engines/).
 ENGINE_PARAMS = {("get_best_moves", "engine"), ("analyze_game", "engine"), ("get_engine_config", "path")}
 
@@ -80,6 +87,11 @@ def classify(fn: str, name: str, ty: str) -> str:
         return "ctx"
     if ty.startswith("AppStateRef"):
         return "state"
+    if ty.lstrip("&") in NESTED_PATH_TYPES:
+        raise SystemExit(
+            f"{fn}.{name}: {ty} nests a client path the generator cannot jail; "
+            "hand-write the route in routes_extra.rs and add the command to SKIP_FNS"
+        )
     if (fn, name) in ENGINE_PARAMS:
         return "engine_path" if ty == "PathBuf" else "engine_string"
     if ty == "PathBuf":
