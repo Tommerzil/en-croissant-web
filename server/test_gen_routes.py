@@ -140,11 +140,33 @@ class GenRoutesTest(unittest.TestCase):
         # games_last_seen. `game_id` on a db command (delete_db_game, write_db_game) is
         # a row in a file and must not.
         src = ATTR_SAMPLE % "game_id: String"
-        self.assertIn("app.touch_game(&args.game_id);",
+        self.assertIn("app.refresh_game(&args.game_id);",
                       g.render_command(g.parse_commands(src, "game")[0]))
         src = ATTR_SAMPLE % "file: PathBuf, game_id: i32"
+        rendered = g.render_command(g.parse_commands(src, "db")[0])
+        self.assertNotIn("refresh_game", rendered)
+        self.assertNotIn("forget_game", rendered)
+
+    def test_a_game_route_never_inserts_a_stamp(self):
+        # `refresh_game`, not `touch_game`: a generated route takes the game id straight
+        # off the wire, so inserting would let any POST plant an entry the reaper then
+        # carries for the full idle limit. Only start_game, which knows the game exists,
+        # registers one.
+        src = ATTR_SAMPLE % "game_id: String"
         self.assertNotIn("touch_game",
-                         g.render_command(g.parse_commands(src, "db")[0]))
+                         g.render_command(g.parse_commands(src, "game")[0]))
+
+    def test_a_game_ending_command_drops_the_stamp(self):
+        # abort_game removes the game, so refreshing its stamp would leave an entry
+        # naming nothing for the next ten minutes.
+        src = g.ATTR + """
+pub fn abort_game(game_id: String) -> Result<(), Error> {
+    Ok(())
+}
+"""
+        rendered = g.render_command(g.parse_commands(src, "game")[0])
+        self.assertIn("app.forget_game(&args.game_id);", rendered)
+        self.assertNotIn("refresh_game", rendered)
 
     def test_nested_path_types_are_refused(self):
         # Every type under src-tauri/src that owns a client path, wrappers and leaves

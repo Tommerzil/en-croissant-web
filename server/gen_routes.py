@@ -40,7 +40,15 @@ TAB_PARAMS = {"tab", "tab_id"}
 # (module, parameter) pairs that name a live play-versus-engine game (drive the game
 # reaper's games_last_seen map). Keyed by module as well as name: `game_id` on a db or
 # pgn command is a row number in a file, not a game holding engines.
+#
+# These emit `refresh_game`, not `touch_game`: refreshing only updates an entry that is
+# already there, so a POST carrying a made-up game id cannot plant one the reaper then
+# carries for ten minutes. `start_game` (hand-written in routes_extra.rs) is the single
+# place that registers a game, and it does so only once the game exists.
 GAME_PARAMS = {("game", "game_id")}
+# Commands in GAME_PARAMS that end the game rather than continue it. They drop the stamp
+# instead of refreshing one that would outlive the game it names by ten minutes.
+GAME_ENDING_FNS = {"abort_game"}
 # Struct arguments with a client path somewhere in their fields. The generator jails
 # whole parameters, not fields, so a command taking one must be hand-written in
 # routes_extra.rs (and listed in SKIP_FNS); seeing one here is a bug, not a case to
@@ -198,7 +206,13 @@ def render_command(c: Command) -> str:
         if p.name in TAB_PARAMS:
             lines.append(f"    app.touch_tab(&args.{p.name});")
         if (c.module, p.name) in GAME_PARAMS:
-            lines.append(f"    app.touch_game(&args.{p.name});")
+            if c.name in GAME_ENDING_FNS:
+                # Before the call rather than after: the id stops naming a live game the
+                # moment we decide to end it, and the teardown is idempotent, so a
+                # failure here leaves nothing worse than an already-dead game unlisted.
+                lines.append(f"    app.forget_game(&args.{p.name});")
+            else:
+                lines.append(f"    app.refresh_game(&args.{p.name});")
     call = f"en_croissant::{c.module}::{c.name}({', '.join(call_arg(p) for p in c.params)})"
     if c.name in SPAWN_FNS:
         # Resolve jailed args eagerly (so a bad path is a 500 now), then detach.

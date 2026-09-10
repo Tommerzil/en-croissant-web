@@ -61,10 +61,7 @@ fn jail_player(data_dir: &Path, player: &mut en_croissant::game::PlayerConfig) -
 }
 
 async fn start_game(State(app): State<App>, Json(mut args): Json<StartGameArgs>) -> ApiResult {
-    // The generated game routes do this too (see GAME_PARAMS in gen_routes.py): a game
-    // nobody plays after starting it still has to be reapable. Registering an id whose
-    // start then fails costs one no-op abort when the reaper next sweeps.
-    app.touch_game(&args.game_id);
+    let game_id = args.game_id.clone();
     // Jail every nested path before the command runs, so a rejected black engine
     // cannot leave a white engine already spawned.
     jail_player(&app.ctx.data_dir, &mut args.config.white)?;
@@ -81,6 +78,13 @@ async fn start_game(State(app): State<App>, Json(mut args): Json<StartGameArgs>)
         &app.ctx.state,
     )
     .await?;
+    // The one place a game is registered with the reaper, and only once it exists: a
+    // game nobody plays after starting it still has to be reapable, but a start that
+    // failed (a rejected engine path, say) must not leave a stamp naming nothing. The
+    // generated game routes only refresh -- see GAME_PARAMS in gen_routes.py. A game
+    // that plays itself can emit its first move event before this line runs; that
+    // refresh is a harmless no-op and the insert follows immediately.
+    app.touch_game(&game_id);
     Ok(Json(serde_json::to_value(out)?))
 }
 

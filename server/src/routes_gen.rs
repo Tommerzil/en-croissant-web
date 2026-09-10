@@ -413,7 +413,7 @@ pub struct GetGameStateArgs {
 }
 
 pub async fn get_game_state(State(app): State<App>, Json(args): Json<GetGameStateArgs>) -> ApiResult {
-    app.touch_game(&args.game_id);
+    app.refresh_game(&args.game_id);
     let out = en_croissant::game::get_game_state(args.game_id, &*app.ctx.state).await?;
     Ok(Json(serde_json::to_value(out)?))
 }
@@ -427,7 +427,7 @@ pub struct MakeGameMoveArgs {
 }
 
 pub async fn make_game_move(State(app): State<App>, Json(args): Json<MakeGameMoveArgs>) -> ApiResult {
-    app.touch_game(&args.game_id);
+    app.refresh_game(&args.game_id);
     let out = en_croissant::game::make_game_move(args.game_id, args.uci, app.ctx.clone(), &*app.ctx.state).await?;
     Ok(Json(serde_json::to_value(out)?))
 }
@@ -440,7 +440,7 @@ pub struct TakeBackGameMoveArgs {
 }
 
 pub async fn take_back_game_move(State(app): State<App>, Json(args): Json<TakeBackGameMoveArgs>) -> ApiResult {
-    app.touch_game(&args.game_id);
+    app.refresh_game(&args.game_id);
     let out = en_croissant::game::take_back_game_move(args.game_id, app.ctx.clone(), &*app.ctx.state).await?;
     Ok(Json(serde_json::to_value(out)?))
 }
@@ -454,7 +454,7 @@ pub struct ResignGameArgs {
 }
 
 pub async fn resign_game(State(app): State<App>, Json(args): Json<ResignGameArgs>) -> ApiResult {
-    app.touch_game(&args.game_id);
+    app.refresh_game(&args.game_id);
     let out = en_croissant::game::resign_game(args.game_id, args.color, app.ctx.clone(), &*app.ctx.state).await?;
     Ok(Json(serde_json::to_value(out)?))
 }
@@ -467,7 +467,7 @@ pub struct AbortGameArgs {
 }
 
 pub async fn abort_game(State(app): State<App>, Json(args): Json<AbortGameArgs>) -> ApiResult {
-    app.touch_game(&args.game_id);
+    app.forget_game(&args.game_id);
     let out = en_croissant::game::abort_game(args.game_id, &*app.ctx.state).await?;
     Ok(Json(serde_json::to_value(out)?))
 }
@@ -481,7 +481,7 @@ pub struct GetGameEngineLogsArgs {
 }
 
 pub async fn get_game_engine_logs(State(app): State<App>, Json(args): Json<GetGameEngineLogsArgs>) -> ApiResult {
-    app.touch_game(&args.game_id);
+    app.refresh_game(&args.game_id);
     let out = en_croissant::game::get_game_engine_logs(args.game_id, args.color, &*app.ctx.state).await?;
     Ok(Json(serde_json::to_value(out)?))
 }
