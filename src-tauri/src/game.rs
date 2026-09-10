@@ -447,7 +447,19 @@ impl GameController {
         Ok(())
     }
 
+    /// Decide whether the position on the board ends the game, and wake the game loop
+    /// if it does. The loop only arms its 100 ms ticker for a game that has a clock, so
+    /// a board result (mate, stalemate, draw) has to signal shutdown the way `end_game`
+    /// does; without it a clockless game would leave its loop -- and its engines --
+    /// parked forever. A take-back that leaves the game `Playing` signals nothing.
     fn check_game_end(&mut self) {
+        self.check_position_for_game_end();
+        if self.status != GameStatus::Playing {
+            self.signal_shutdown();
+        }
+    }
+
+    fn check_position_for_game_end(&mut self) {
         if self.position.is_checkmate() {
             let result = if self.position.turn() == Color::White {
                 GameResult::BlackWins {
@@ -548,6 +560,13 @@ impl GameController {
 
     fn end_game(&mut self, result: GameResult) {
         self.status = GameStatus::Finished { result };
+        self.signal_shutdown();
+    }
+
+    /// Tell the game loop to stop and quit the engines. A no-op before the loop exists
+    /// (the initial moves are applied while the controller is still being built) and
+    /// after it has already been told once.
+    fn signal_shutdown(&mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(true);
         }
@@ -1217,6 +1236,26 @@ async fn game_loop(
     mut move_notify_rx: tokio::sync::mpsc::Receiver<()>,
     app: AppCtx,
 ) {
+    // A game without time controls has nothing to tick for: `check_timeout` can never
+    // fire and `get_current_times` is always (None, None), so the 100 ms ticker only
+    // broadcast an empty clock ten times a second for as long as the game existed --
+    // forever, for a game nobody comes back to. `clock` is decided once in
+    // `GameController::new` and never becomes Some or None later (`reset_clock` only
+    // moves `last_tick`), so reading it once here is enough. A game that has a clock
+    // ticks exactly as it did before.
+    let (has_clock, playing) = {
+        let ctrl = controller.read().await;
+        (ctrl.clock.is_some(), ctrl.status == GameStatus::Playing)
+    };
+
+    // Initial moves can end the game before the loop starts. With no clock there is no
+    // tick to notice, so there would be nothing left to wake the loop.
+    if !playing {
+        quit_engines(&controller).await;
+        info!("Game loop ended for {}", game_id);
+        return;
+    }
+
     let mut clock_interval = interval(Duration::from_millis(100));
     let mut engine_task: Option<tokio::task::JoinHandle<Result<(), Error>>> = None;
 
@@ -1288,7 +1327,11 @@ async fn game_loop(
                 }
             }
 
-            _ = clock_interval.tick() => {
+            // Only a clocked game needs the ticker. A clockless one parks on the three
+            // branches above instead: every way it can end -- a move that mates or
+            // draws, a resignation, an abort, an engine failure -- either signals
+            // `shutdown_tx` or completes the engine task.
+            _ = clock_interval.tick(), if has_clock => {
                 let is_finished;
 
                 {
@@ -1325,19 +1368,23 @@ async fn game_loop(
         task.abort();
     }
 
-    {
-        let ctrl = controller.read().await;
-        if let Some(engine) = &ctrl.white_engine {
-            let mut proc = engine.lock().await;
-            let _ = proc.quit().await;
-        }
-        if let Some(engine) = &ctrl.black_engine {
-            let mut proc = engine.lock().await;
-            let _ = proc.quit().await;
-        }
-    }
+    quit_engines(&controller).await;
 
     info!("Game loop ended for {}", game_id);
+}
+
+/// Ask both of a game's engines to exit. Dropping the controller kills whatever is
+/// left (`BaseEngine` spawns with `kill_on_drop`), so this is the polite half.
+async fn quit_engines(controller: &Arc<RwLock<GameController>>) {
+    let ctrl = controller.read().await;
+    if let Some(engine) = &ctrl.white_engine {
+        let mut proc = engine.lock().await;
+        let _ = proc.quit().await;
+    }
+    if let Some(engine) = &ctrl.black_engine {
+        let mut proc = engine.lock().await;
+        let _ = proc.quit().await;
+    }
 }
 
 fn try_polyglot_book_move(controller: &GameController) -> Option<String> {

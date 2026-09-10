@@ -43,6 +43,27 @@ fn game_config(white: serde_json::Value, black: serde_json::Value) -> serde_json
     })
 }
 
+/// Drain the socket until `window` elapses, counting this game's clock ticks.
+async fn count_clock_events(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    game_id: &str,
+    window: Duration,
+) -> usize {
+    let deadline = tokio::time::Instant::now() + window;
+    let mut n = 0;
+    while let Ok(Some(Ok(msg))) = tokio::time::timeout_at(deadline, ws.next()).await {
+        if let Message::Text(t) = msg {
+            let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+            if v["event"] == "clock-update-event" && v["payload"]["gameId"] == game_id {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
 /// End to end over HTTP: start a game whose white player is the stub engine, watch the
 /// engine's move arrive on the event socket, then read the state back over the route.
 #[tokio::test]
@@ -151,4 +172,71 @@ async fn engine_path_traversal_is_refused() {
     assert_eq!(r.status(), 500);
     let msg = r.text().await.unwrap();
     assert!(msg.contains("escapes data dir"), "{msg}");
+}
+
+/// A game with no time control has no clock to tick: it must sit idle instead of
+/// broadcasting an empty clock ten times a second for as long as the server runs.
+/// A game that does have a clock must still tick.
+#[tokio::test]
+async fn untimed_game_does_not_tick_while_a_timed_one_does() {
+    let s = common::spawn().await;
+    let (mut ws, _) = connect_async(&s.ws_url).await.unwrap();
+
+    // Two humans: nothing moves, so every frame in the window came from the ticker.
+    let r = common::cmd(
+        &s,
+        "start_game",
+        serde_json::json!({
+            "gameId": "untimed",
+            "config": game_config(human_player(), human_player()),
+        }),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    let ticks = count_clock_events(&mut ws, "untimed", Duration::from_millis(700)).await;
+    assert_eq!(ticks, 0, "an untimed game must not tick");
+
+    let mut config = game_config(human_player(), human_player());
+    config["whiteTimeControl"] = serde_json::json!({ "initialTime": 60000, "increment": 0 });
+    config["blackTimeControl"] = serde_json::json!({ "initialTime": 60000, "increment": 0 });
+    let r = common::cmd(
+        &s,
+        "start_game",
+        serde_json::json!({ "gameId": "timed", "config": config }),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    // 100 ms ticker, so ~7 in the window; assert only that it is clearly ticking.
+    let ticks = count_clock_events(&mut ws, "timed", Duration::from_millis(700)).await;
+    assert!(ticks >= 3, "a timed game must still tick, got {ticks}");
+
+    for id in ["untimed", "timed"] {
+        common::cmd(&s, "abort_game", serde_json::json!({ "gameId": id })).await;
+    }
+}
+
+/// Initial moves can finish a game before its loop starts (here, fool's mate). The
+/// loop has no clock tick to notice that, so it has to check up front and stop.
+#[tokio::test]
+async fn game_finished_by_its_initial_moves_reads_back_as_finished() {
+    let s = common::spawn().await;
+    let engine = install_stub(&s);
+    let mut config = game_config(engine_player(&engine), human_player());
+    config["initialMoves"] = serde_json::json!(["f2f3", "e7e5", "g2g4", "d8h4"]);
+
+    let r = common::cmd(
+        &s,
+        "start_game",
+        serde_json::json!({ "gameId": "mated", "config": config }),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    let state: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(state["status"]["finished"]["result"]["type"], "blackWins");
+
+    // The loop stopped instead of asking the engine to move in a mated position.
+    let r = common::cmd(&s, "get_game_state", serde_json::json!({ "gameId": "mated" })).await;
+    let state: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(state["ply"], 4);
+    common::cmd(&s, "abort_game", serde_json::json!({ "gameId": "mated" })).await;
 }
