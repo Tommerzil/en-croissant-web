@@ -31,21 +31,37 @@ export function flattenDecks(decks: Position[][]): ChapterCard[] {
     return out;
 }
 
-/** Earliest due card at or before `now`; ties resolve by chapter then index. */
+function fileOrderBefore(a: ChapterCard, b: ChapterCard): boolean {
+    return a.chapter < b.chapter || (a.chapter === b.chapter && a.index < b.index);
+}
+
+/**
+ * The next card to present, among cards due at or before `now`.
+ *
+ * Seen cards (`reps > 0`) come first: the earliest due wins, ties resolve by chapter then
+ * index. Only when no seen card is due is an unseen card served, the first in file order
+ * (lowest chapter, then lowest index). An unseen card's `due` is its creation time, which
+ * is always in the past, so ordering unseen cards by `due` would put every one of them
+ * ahead of a missed puzzle and a miss would not come back for weeks.
+ */
 export function nextDueCard(cards: ChapterCard[], now: Date = new Date()): ChapterCard | null {
-    let best: ChapterCard | null = null;
+    let seen: ChapterCard | null = null;
+    let unseen: ChapterCard | null = null;
     for (const c of cards) {
         if (c.due > now) continue;
-        if (
-            best === null ||
-            c.due < best.due ||
-            (c.due.getTime() === best.due.getTime() &&
-                (c.chapter < best.chapter || (c.chapter === best.chapter && c.index < best.index)))
-        ) {
-            best = c;
+        if (c.reps > 0) {
+            if (
+                seen === null ||
+                c.due < seen.due ||
+                (c.due.getTime() === seen.due.getTime() && fileOrderBefore(c, seen))
+            ) {
+                seen = c;
+            }
+        } else if (unseen === null || fileOrderBefore(c, unseen)) {
+            unseen = c;
         }
     }
-    return best;
+    return seen ?? unseen;
 }
 
 /** Every card once, in file order. */

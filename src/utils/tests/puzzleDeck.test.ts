@@ -24,9 +24,45 @@ describe("puzzleDeck", () => {
         ]);
     });
 
-    it("picks the earliest due card, ties broken by chapter then index", () => {
+    it("serves unseen cards in file order when nothing has been seen", () => {
         const cards = flattenDecks([[pos("a", T0)], [pos("b", earlier), pos("c", earlier)]]);
-        expect(nextDueCard(cards, T0)?.fen).toBe("b");
+        expect(nextDueCard(cards, T0)?.fen).toBe("a");
+    });
+
+    it("serves a relearn card due now before an unseen card due earlier", () => {
+        const cards = flattenDecks([[pos("unseen", earlier, 0)], [pos("missed", T0, 1)]]);
+        expect(nextDueCard(cards, T0)?.fen).toBe("missed");
+    });
+
+    it("picks the earliest due relearn card, equal dues resolved by the lower chapter", () => {
+        const mid = new Date("2026-09-11T09:30:00Z");
+        const withMid = flattenDecks([[pos("mid", mid, 1)], [pos("early", earlier, 1)]]);
+        expect(nextDueCard(withMid, T0)?.fen).toBe("early");
+
+        const cards = flattenDecks([
+            [pos("late", T0, 2)],
+            [pos("tieChapter1", earlier, 1)],
+            [pos("unseen", new Date(0), 0), pos("tieChapter2", earlier, 3)],
+        ]);
+        // Reversed so the chapter-2 card is met first: the tie-break, not input order, decides.
+        expect(nextDueCard(cards.slice().reverse(), T0)?.fen).toBe("tieChapter1");
+    });
+
+    it("serves unseen cards in file order regardless of their due values", () => {
+        const cards = flattenDecks([
+            [pos("a", T0, 0), pos("b", earlier, 0)],
+            [pos("c", new Date(0), 0)],
+        ]);
+        expect(nextDueCard(cards, T0)?.fen).toBe("a");
+        expect(nextDueCard(cards.slice(1), T0)?.fen).toBe("b");
+    });
+
+    it("handles no chapters at all", () => {
+        expect(flattenDecks([])).toEqual([]);
+        expect(nextDueCard([])).toBeNull();
+        const s = sumStats([]);
+        expect(s.total).toBe(0);
+        expect(s.nextDue).toBeNull();
     });
 
     it("returns null when nothing is due", () => {
