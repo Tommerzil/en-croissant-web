@@ -74,6 +74,11 @@ import { getTabFile, getTabGameNumber } from "@/utils/tabs";
 import { findFen, getNodeAtPath } from "@/utils/treeReducer";
 import { unwrap } from "@/utils/unwrap";
 
+// PUZZLE: chapters parsed at once by the loader. parsePGN is one lexPgn HTTP round trip
+// per chapter in the web build; one after another, ~900 chapters took a minute or two on
+// every mount.
+const CHAPTER_LOAD_WORKERS = 8;
+
 /**
  * Practice panel for puzzle sets: a copy of PracticePanel that drills every chapter of
  * a multi-game file as one deck.
@@ -142,6 +147,13 @@ function PuzzlePracticePanel() {
 
   useEffect(() => {
     if (!tabFile || chaptersLoaded) return;
+    // PUZZLE: a file with no games has no chapters to read, and readGames(path, 0, -1)
+    // panics in the desktop backend (src-tauri/src/pgn.rs). Skip the loader; the panel
+    // then shows the existing "no puzzle positions" message.
+    if (numChapters === 0) {
+      setChaptersLoaded(true);
+      return;
+    }
     let cancelled = false;
     (async () => {
       // PUZZLE: a failed read ends the load with a message rather than an unhandled
@@ -163,30 +175,46 @@ function PuzzlePracticePanel() {
       const jotai = getDefaultStore();
       // PUZZLE: one unreadable chapter is skipped; the chapters after it still load.
       let skipped = 0;
-      for (let i = 0; i < pgns.length; i++) {
-        try {
-          const tree = await parsePGN(pgns[i]);
-          const orientation = tree.headers.orientation || "white";
-          const start = tree.headers.start || [];
-          const deckAtom = deckAtomFamily({ file: tabFile.path, game: i });
-          const existing = jotai.get(deckAtom);
-          if (existing.positions.length === 0) {
-            const fresh = buildFromTree(tree.root, orientation, start);
-            if (fresh.length > 0) jotai.set(deckAtom, { positions: fresh, logs: [] });
-          } else {
-            const { positions, added, removed } = syncDeck(
-              existing.positions,
-              tree.root,
-              orientation,
-              start,
-            );
-            if (added > 0 || removed > 0) jotai.set(deckAtom, { ...existing, positions });
+      // PUZZLE: a bounded pool of workers, each taking the next chapter index from this
+      // shared counter. Every `cancelled` check matters: after unmount the deck atoms are
+      // unsubscribed and read back empty, so a late write would overwrite saved progress,
+      // and a remount would otherwise run a second loader alongside this one.
+      let nextChapter = 0;
+      const worker = async () => {
+        while (true) {
+          if (cancelled) return;
+          const i = nextChapter++;
+          if (i >= pgns.length) return;
+          try {
+            const tree = await parsePGN(pgns[i]);
+            if (cancelled) return;
+            // PUZZLE: no await between reading the existing deck and writing it. That
+            // ordering is what keeps a concurrent write to the same deck from being lost.
+            const orientation = tree.headers.orientation || "white";
+            const start = tree.headers.start || [];
+            const deckAtom = deckAtomFamily({ file: tabFile.path, game: i });
+            const existing = jotai.get(deckAtom);
+            if (existing.positions.length === 0) {
+              const fresh = buildFromTree(tree.root, orientation, start);
+              if (fresh.length > 0) jotai.set(deckAtom, { positions: fresh, logs: [] });
+            } else {
+              const { positions, added, removed } = syncDeck(
+                existing.positions,
+                tree.root,
+                orientation,
+                start,
+              );
+              if (added > 0 || removed > 0) jotai.set(deckAtom, { ...existing, positions });
+            }
+          } catch (e) {
+            console.error(`PuzzlePracticePanel: chapter ${i + 1} could not be read`, e);
+            skipped++;
           }
-        } catch (e) {
-          console.error(`PuzzlePracticePanel: chapter ${i + 1} could not be read`, e);
-          skipped++;
         }
-      }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(CHAPTER_LOAD_WORKERS, pgns.length) }, () => worker()),
+      );
       if (!cancelled) {
         if (skipped > 0) {
           // i18n: literal string; see the i18n note in the plan's constraints.
@@ -265,24 +293,51 @@ function PuzzlePracticePanel() {
     return answerChild?.comment ?? currentComment;
   }, [root, practiceState.currentFen, practiceState.answer, currentComment]);
 
+  // PUZZLE: declared before switchChapter, whose failure path clears it.
+  const pendingRef = useRef<ChapterCard | null>(null);
+
   // PUZZLE: same mechanism as the info panel's game pager, without the dirty check
   // (a puzzle chapter is never edited during a drill).
   const switchChapter = useCallback(
     async (chapter: number) => {
       if (!tabFile) return;
-      const data = unwrap(await commands.readGames(tabFile.path, chapter, chapter));
-      const tree = await parsePGN(data[0]);
-      setState(tree);
-      setCurrentTab((prev) => {
-        if (prev.gameOrigin.kind !== "file" && prev.gameOrigin.kind !== "temp_file") return prev;
-        return { ...prev, gameOrigin: { ...prev.gameOrigin, gameNumber: chapter } };
-      });
+      // PUZZLE: a failed read or parse ends the drill with a message. Unhandled, it left
+      // the phase "waiting" on a position that is not on the board; that panel has no
+      // Stop, and "Go back" went to the old chapter's root, so the user was stuck.
+      try {
+        const data = unwrap(await commands.readGames(tabFile.path, chapter, chapter));
+        if (data[0] === undefined) throw new Error("the file has no such chapter");
+        const tree = await parsePGN(data[0]);
+        setState(tree);
+        setCurrentTab((prev) => {
+          if (prev.gameOrigin.kind !== "file" && prev.gameOrigin.kind !== "temp_file") return prev;
+          return { ...prev, gameOrigin: { ...prev.gameOrigin, gameNumber: chapter } };
+        });
+      } catch (e) {
+        console.error(`PuzzlePracticePanel: chapter ${chapter + 1} could not be opened`, e);
+        pendingRef.current = null;
+        setPracticeState({ phase: "idle" });
+        setPracticePath(null);
+        setShowComments(true);
+        setEvalOpen(true);
+        // i18n: literal string; see the i18n note in the plan's constraints.
+        setLoadError(
+          `Could not open chapter ${chapter + 1}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
     },
-    [tabFile, setState, setCurrentTab],
+    [
+      tabFile,
+      setState,
+      setCurrentTab,
+      setPracticeState,
+      setPracticePath,
+      setShowComments,
+      setEvalOpen,
+    ],
   );
 
   const currentChapter = getTabGameNumber(currentTab);
-  const pendingRef = useRef<ChapterCard | null>(null);
 
   const presentCard = useCallback(
     (fen: string) => {
@@ -372,20 +427,29 @@ function PuzzlePracticePanel() {
     ],
   );
 
+  // PUZZLE: one full-practice step after a correct answer. The auto-advance timer below
+  // and the "Next puzzle" button both make exactly this update.
+  const advanceFullCorrect = useCallback(() => {
+    const remainingPositions = sessionStats.remainingPositions.slice(1);
+    setSessionStats((prev) => ({
+      ...prev,
+      remainingPositions,
+      correct: prev.correct + 1,
+      streak: prev.streak + 1,
+      bestStreak: Math.max(prev.bestStreak, prev.streak + 1),
+    }));
+    newPractice({ remainingPositions, mode: "full" });
+  }, [sessionStats.remainingPositions, setSessionStats, newPractice]);
+
   useEffect(() => {
     if (practiceState.phase === "correct") {
+      // PUZZLE: a puzzle with a comment never auto-advances, in either mode: the comment
+      // explains what happened in the game and would flash past in 300ms. Anki mode shows
+      // the grade buttons (grading advances); full mode shows the correct panel with a
+      // "Next puzzle" button. Without a comment nothing changes.
+      if (answerComment) return;
       if (sessionStats.mode === "full") {
-        const timer = setTimeout(() => {
-          const remainingPositions = sessionStats.remainingPositions.slice(1);
-          setSessionStats((prev) => ({
-            ...prev,
-            remainingPositions,
-            correct: prev.correct + 1,
-            streak: prev.streak + 1,
-            bestStreak: Math.max(prev.bestStreak, prev.streak + 1),
-          }));
-          newPractice({ remainingPositions, mode: "full" });
-        }, 300);
+        const timer = setTimeout(advanceFullCorrect, 300);
         return () => clearTimeout(timer);
       } else if (practiceAutoDifficulty !== "none" && practiceState.positionIndex !== undefined) {
         const positionIndex = practiceState.positionIndex;
@@ -409,15 +473,25 @@ function PuzzlePracticePanel() {
     practiceState.phase,
     practiceState.positionIndex,
     sessionStats.mode,
-    sessionStats.remainingPositions,
     newPractice,
     setSessionStats,
     practiceAutoDifficulty,
     deck.positions,
     setDeck,
+    answerComment,
+    advanceFullCorrect,
   ]);
 
+  // PUZZLE: the full-practice correct panel's "Next puzzle" button and Space key.
+  function nextPuzzle() {
+    if (practiceState.phase !== "correct" || sessionStats.mode !== "full") return;
+    advanceFullCorrect();
+  }
+
   function handleQualityRating(grade: 1 | 2 | 3 | 4) {
+    // PUZZLE: full practice never grades. Its correct panel now stays up for a puzzle
+    // with a comment, so the rating keys must not grade (or re-present) the card there.
+    if (sessionStats.mode === "full") return;
     if (practiceState.phase !== "correct" || practiceState.positionIndex === undefined) return;
 
     const { positionIndex } = practiceState;
@@ -471,20 +545,26 @@ function PuzzlePracticePanel() {
     }
   }
 
+  // PUZZLE: the rating keys are off in full practice, which never grades.
+  const ratingKeysEnabled = practiceState.phase === "correct" && sessionStats.mode !== "full";
   useHotkeys("1", () => handleQualityRating(1), {
-    enabled: practiceState.phase === "correct",
+    enabled: ratingKeysEnabled,
   });
   useHotkeys("2", () => handleQualityRating(2), {
-    enabled: practiceState.phase === "correct",
+    enabled: ratingKeysEnabled,
   });
   useHotkeys("3", () => handleQualityRating(3), {
-    enabled: practiceState.phase === "correct",
+    enabled: ratingKeysEnabled,
   });
   useHotkeys("4", () => handleQualityRating(4), {
-    enabled: practiceState.phase === "correct",
+    enabled: ratingKeysEnabled,
   });
   useHotkeys("space", () => skipCard(), {
     enabled: practiceState.phase === "incorrect",
+  });
+  // PUZZLE: Space is "Next puzzle" on the full-practice correct panel.
+  useHotkeys("space", () => nextPuzzle(), {
+    enabled: practiceState.phase === "correct" && sessionStats.mode === "full" && !!answerComment,
   });
 
   const [positionsOpen, setPositionsOpen] = useToggle();
@@ -702,21 +782,27 @@ function PuzzlePracticePanel() {
                         {t("Board.Practice.StartPractice")}
                       </Button>
                     )}
+                    {/* PUZZLE: disabled until every chapter has loaded, because the
+                        session's indices are computed over the whole file's card order
+                        and would shift under it mid-session. The badge counts the whole
+                        file, not the open chapter. */}
                     <Button
                       size="md"
                       variant="light"
                       color="gray"
                       fullWidth
+                      disabled={!chaptersLoaded}
                       onClick={startFullPractice}
                       leftSection={<IconBook size={20} />}
                       justify="space-between"
                       rightSection={
                         <Badge size="sm" variant="white" color="gray">
-                          {deck.positions.length}
+                          {stats.total}
                         </Badge>
                       }
                     >
-                      {t("Board.Practice.PracticeFullRepertoire")}
+                      {/* PUZZLE: literal string; see the i18n note in the plan's constraints. */}
+                      Practice all puzzles
                     </Button>
                   </Stack>
                 )}
@@ -794,6 +880,38 @@ function PuzzlePracticePanel() {
                     />
                   </>
                 )}
+
+                {/* PUZZLE: full practice shows a correct panel only for a puzzle with a
+                    comment, which never auto-advances; "Next puzzle" or Space moves on. */}
+                {practiceState.phase === "correct" &&
+                  sessionStats.mode === "full" &&
+                  !!answerComment && (
+                    <Paper p="sm" withBorder>
+                      <Stack gap="xs" align="center">
+                        <Group gap="xs">
+                          <ThemeIcon size="md" color="green" variant="light" radius="xl">
+                            <IconCheck size={16} />
+                          </ThemeIcon>
+                          <Text fw={500} c="green">
+                            {t("Board.Practice.Correct")}
+                          </Text>
+                          {practiceState.timeTaken !== undefined && (
+                            <Text fz="xs" c="dimmed">
+                              ({(practiceState.timeTaken / 1000).toFixed(1)}s)
+                            </Text>
+                          )}
+                        </Group>
+                        <Paper p="xs" withBorder w="100%">
+                          <Comment comment={answerComment} />
+                        </Paper>
+                        <Button variant="light" size="sm" onClick={nextPuzzle}>
+                          {/* PUZZLE: literal string; see the i18n note in the plan's
+                              constraints. */}
+                          Next puzzle
+                        </Button>
+                      </Stack>
+                    </Paper>
+                  )}
 
                 {practiceState.phase === "incorrect" && (
                   <Paper p="sm" withBorder>
