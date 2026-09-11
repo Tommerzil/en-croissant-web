@@ -114,6 +114,9 @@ function PuzzlePracticePanel() {
   // below keeps the open chapter in sync afterwards.
   const numChapters = tabFile?.numGames ?? 1;
   const [chaptersLoaded, setChaptersLoaded] = useState(false);
+  // PUZZLE: set when the file or some of its chapters could not be read, so the panel
+  // shows why instead of sitting on "Loading..." forever.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [decksVersion, setDecksVersion] = useState(0);
   const setState = useStore(store, (s) => s.setState);
 
@@ -144,28 +147,56 @@ function PuzzlePracticePanel() {
     if (!tabFile || chaptersLoaded) return;
     let cancelled = false;
     (async () => {
-      const pgns = unwrap(await commands.readGames(tabFile.path, 0, numChapters - 1));
-      const jotai = getDefaultStore();
-      for (let i = 0; i < pgns.length; i++) {
-        const tree = await parsePGN(pgns[i]);
-        const orientation = tree.headers.orientation || "white";
-        const start = tree.headers.start || [];
-        const deckAtom = deckAtomFamily({ file: tabFile.path, game: i });
-        const existing = jotai.get(deckAtom);
-        if (existing.positions.length === 0) {
-          const fresh = buildFromTree(tree.root, orientation, start);
-          if (fresh.length > 0) jotai.set(deckAtom, { positions: fresh, logs: [] });
-        } else {
-          const { positions, added, removed } = syncDeck(
-            existing.positions,
-            tree.root,
-            orientation,
-            start,
+      // PUZZLE: a failed read ends the load with a message rather than an unhandled
+      // rejection that leaves the panel on "Loading..." with no way out.
+      let pgns: string[];
+      try {
+        pgns = unwrap(await commands.readGames(tabFile.path, 0, numChapters - 1));
+      } catch (e) {
+        console.error("PuzzlePracticePanel: could not read the puzzle file", e);
+        if (!cancelled) {
+          // i18n: literal string; see the i18n note in the plan's constraints.
+          setLoadError(
+            `Could not read the puzzle file: ${e instanceof Error ? e.message : String(e)}`,
           );
-          if (added > 0 || removed > 0) jotai.set(deckAtom, { ...existing, positions });
+          setChaptersLoaded(true);
+        }
+        return;
+      }
+      const jotai = getDefaultStore();
+      // PUZZLE: one unreadable chapter is skipped; the chapters after it still load.
+      let skipped = 0;
+      for (let i = 0; i < pgns.length; i++) {
+        try {
+          const tree = await parsePGN(pgns[i]);
+          const orientation = tree.headers.orientation || "white";
+          const start = tree.headers.start || [];
+          const deckAtom = deckAtomFamily({ file: tabFile.path, game: i });
+          const existing = jotai.get(deckAtom);
+          if (existing.positions.length === 0) {
+            const fresh = buildFromTree(tree.root, orientation, start);
+            if (fresh.length > 0) jotai.set(deckAtom, { positions: fresh, logs: [] });
+          } else {
+            const { positions, added, removed } = syncDeck(
+              existing.positions,
+              tree.root,
+              orientation,
+              start,
+            );
+            if (added > 0 || removed > 0) jotai.set(deckAtom, { ...existing, positions });
+          }
+        } catch (e) {
+          console.error(`PuzzlePracticePanel: chapter ${i + 1} could not be read`, e);
+          skipped++;
         }
       }
-      if (!cancelled) setChaptersLoaded(true);
+      if (!cancelled) {
+        if (skipped > 0) {
+          // i18n: literal string; see the i18n note in the plan's constraints.
+          setLoadError(`${skipped} of ${pgns.length} chapters could not be read and were skipped.`);
+        }
+        setChaptersLoaded(true);
+      }
     })();
     return () => {
       cancelled = true;
@@ -267,12 +298,17 @@ function PuzzlePracticePanel() {
   // PUZZLE: a card in another chapter is presented only once that chapter's tree has
   // replaced `root`, which happens asynchronously after switchChapter.
   useEffect(() => {
+    // PUZZLE: only a drill still waiting for this card may present it. A Stop or Reset
+    // while the chapter loads puts the phase back to idle, and the late load must not
+    // restart the drill. Stop and Reset also clear the ref; this catches any path that
+    // forgets to.
+    if (practiceState.phase !== "waiting") return;
     const pending = pendingRef.current;
     if (!pending || pending.chapter !== currentChapter) return;
     if (findFen(pending.fen, root).length === 0 && root.fen !== pending.fen) return;
     pendingRef.current = null;
     presentCard(pending.fen);
-  }, [root, currentChapter, presentCard]);
+  }, [root, currentChapter, presentCard, practiceState.phase]);
 
   // PUZZLE: picks the next card across every chapter, then switches the tab to that
   // chapter when it is not the open one.
@@ -292,6 +328,8 @@ function PuzzlePracticePanel() {
       }
 
       if (!target) {
+        // PUZZLE: no card left, so no chapter load may present one later.
+        pendingRef.current = null;
         setPracticeState({ phase: "idle" });
         setPracticePath(null);
         setShowComments(true);
@@ -466,6 +504,12 @@ function PuzzlePracticePanel() {
 
         <Tabs.Panel value="train" style={{ overflow: "hidden" }}>
           <Stack p="sm" gap="md">
+            {/* PUZZLE: why the file, or some of its chapters, did not load. */}
+            {loadError && (
+              <Alert color="red" icon={<IconInfoCircle />}>
+                <Text fz="sm">{loadError}</Text>
+              </Alert>
+            )}
             {stats.total === 0 && (
               <Alert icon={<IconInfoCircle />}>
                 {/* PUZZLE: literal string; see the i18n note in the plan's constraints. */}
@@ -695,6 +739,9 @@ function PuzzlePracticePanel() {
                           size="compact-xs"
                           color="red"
                           onClick={() => {
+                            // PUZZLE: drop a card whose chapter is still loading, or the
+                            // load would restart the drill after Stop.
+                            pendingRef.current = null;
                             setPracticeState({ phase: "idle" });
                             setPracticePath(null);
                             setInvisible(false);
@@ -802,6 +849,9 @@ function PuzzlePracticePanel() {
                 logs: [],
               });
           }
+          // PUZZLE: a card pending on a chapter load belongs to a deck just emptied.
+          pendingRef.current = null;
+          setLoadError(null);
           setChaptersLoaded(false);
           setDecksVersion((v) => v + 1);
           setPracticeState({ phase: "idle" });
