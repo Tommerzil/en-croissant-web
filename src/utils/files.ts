@@ -89,7 +89,8 @@ export async function openFile(
         },
     });
 
-    if (fileInfo.metadata.type === "repertoire") {
+    // Puzzle sets open on the practice tab too; BoardAnalysis labels it "Puzzles".
+    if (fileInfo.metadata.type === "repertoire" || fileInfo.metadata.type === "puzzle") {
         store.set(tabFamily(id), "practice");
     }
 
