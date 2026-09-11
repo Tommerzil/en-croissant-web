@@ -91,9 +91,6 @@ function PuzzlePracticePanel() {
   const goToMove = useStore(store, (s) => s.goToMove);
   const setPracticePath = useStore(store, (s) => s.setPracticePath);
   const currentFen = useStore(store, (s) => s.currentNode().fen);
-  // PUZZLE: after a correct or incorrect move the board sits on the solution node,
-  // whose comment says what happened in the game. The repertoire panel hides comments
-  // for the whole drill; here they belong on the answer.
   const currentComment = useStore(store, (s) => s.currentNode().comment);
 
   // PUZZLE: writable, because presenting a card in another chapter moves the tab's
@@ -253,6 +250,20 @@ function PuzzlePracticePanel() {
   const [sessionStats, setSessionStats] = useAtom(practiceSessionStatsAtom);
   const setCardStartTime = useSetAtom(practiceCardStartTimeAtom);
   const practiceAutoDifficulty = useAtomValue(practiceAutoDifficultyAtom);
+
+  // PUZZLE: after a correct move the board is advanced onto the solution node, so
+  // currentNode().comment already works. After a WRONG move Board.tsx never plays it
+  // (:202-213), so the board stays on the card node, which has no comment - the comment
+  // lives on the card's answer child. Look that child up by SAN from the card node
+  // (found via practiceState.currentFen) so both answer panels can show it, falling back
+  // to currentNode().comment so nothing regresses when there is no pending answer.
+  const answerComment = useMemo(() => {
+    if (!practiceState.currentFen || !practiceState.answer) return currentComment;
+    const cardPath = findFen(practiceState.currentFen, root);
+    const cardNode = getNodeAtPath(root, cardPath);
+    const answerChild = cardNode.children.find((c) => c.san === practiceState.answer);
+    return answerChild?.comment ?? currentComment;
+  }, [root, practiceState.currentFen, practiceState.answer, currentComment]);
 
   // PUZZLE: same mechanism as the info panel's game pager, without the dirty check
   // (a puzzle chapter is never edited during a drill).
@@ -767,9 +778,9 @@ function PuzzlePracticePanel() {
                 {practiceState.phase === "correct" && sessionStats.mode !== "full" && (
                   <>
                     {/* PUZZLE: the solution node's comment, above the rating buttons. */}
-                    {currentComment && (
+                    {answerComment && (
                       <Paper p="xs" withBorder>
-                        <Comment comment={currentComment} />
+                        <Comment comment={answerComment} />
                       </Paper>
                     )}
                     <QualityRatingPanel
@@ -800,10 +811,12 @@ function PuzzlePracticePanel() {
                           move: practiceState.answer,
                         })}
                       </Text>
-                      {/* PUZZLE: the solution node's comment explains what happened. */}
-                      {currentComment && (
+                      {/* PUZZLE: the solution node's comment explains what happened. A
+                          wrong move is never played (Board.tsx), so the board stays on
+                          the card node; answerComment reads it from the answer child. */}
+                      {answerComment && (
                         <Paper p="xs" withBorder w="100%">
-                          <Comment comment={currentComment} />
+                          <Comment comment={answerComment} />
                         </Paper>
                       )}
                       <Button variant="light" size="sm" onClick={skipCard}>
