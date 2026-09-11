@@ -37,6 +37,7 @@ import AnnotationPanel from "../panels/annotation/AnnotationPanel";
 import DatabasePanel from "../panels/database/DatabasePanel";
 import InfoPanel from "../panels/info/InfoPanel";
 import PracticePanel from "../panels/practice/PracticePanel";
+import PuzzlePracticePanel from "../panels/practice/PuzzlePracticePanel";
 import Board from "./Board";
 import BoardControls from "./BoardControls";
 import EditingCard from "./EditingCard";
@@ -119,6 +120,10 @@ function BoardAnalysis() {
   const [, setReportModalOpen] = useAtom(currentReportModalOpenAtom);
   const practiceTabSelected = useAtomValue(currentPracticeTabAtom);
   const isRepertoire = tabFile?.metadata.type === "repertoire";
+  // A puzzle set is a multi-game file typed "puzzle"; it gets the practice tab with the
+  // chapter-spanning panel instead of the repertoire one.
+  const isPuzzleSet = tabFile?.metadata.type === "puzzle";
+  const hasPractice = isRepertoire || isPuzzleSet;
   const practicing = currentTabSelected === "practice" && practiceTabSelected === "train";
   const practiceState = useAtomValue(practiceStateAtom);
   const isPracticeRating = practicing && practiceState.phase === "correct";
@@ -144,7 +149,7 @@ function BoardAnalysis() {
     [
       keyMap.PRACTICE_TAB.keys,
       () => {
-        isRepertoire && setCurrentTabSelected("practice");
+        hasPractice && setCurrentTabSelected("practice");
       },
     ],
     [keyMap.ANALYSIS_TAB.keys, () => setCurrentTabSelected("analysis")],
@@ -211,9 +216,11 @@ function BoardAnalysis() {
             }}
           >
             <Tabs.List grow>
-              {isRepertoire && (
+              {hasPractice && (
                 <Tabs.Tab value="practice" leftSection={<IconTargetArrow size="1rem" />}>
-                  {t("Board.Tabs.Practice")}
+                  {/* Literal for puzzle sets: adding a key to all 16 locale files is
+                      disproportionate for one label. */}
+                  {isPuzzleSet ? "Puzzles" : t("Board.Tabs.Practice")}
                 </Tabs.Tab>
               )}
               <Tabs.Tab value="analysis" leftSection={<IconZoomCheck size="1rem" />}>
@@ -229,9 +236,9 @@ function BoardAnalysis() {
                 {t("Board.Tabs.Info")}
               </Tabs.Tab>
             </Tabs.List>
-            {isRepertoire && (
+            {hasPractice && (
               <Tabs.Panel value="practice" flex={1} style={{ overflowY: "hidden" }}>
-                <PracticePanel />
+                {isPuzzleSet ? <PuzzlePracticePanel /> : <PracticePanel />}
               </Tabs.Panel>
             )}
             <Tabs.Panel value="info" flex={1} style={{ overflowY: "hidden" }}>
