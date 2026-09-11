@@ -6,10 +6,10 @@
 [Black "?"]
 [Result "*"]
 [SetUp "1"]
-[FEN "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4"]
+[FEN "r1bqkbnr/pppp1ppp/2n5/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 3 3"]
 [Orientation "white"]
 
-4. Qxf7# { Scholar's mate. Fixture chapter one. } *
+3... Nf6 4. Qxf7# { Scholar's mate. Fixture chapter one. } *
 
 [Event "fixture-2"]
 [Site "?"]
@@ -19,10 +19,10 @@
 [Black "?"]
 [Result "*"]
 [SetUp "1"]
-[FEN "6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1"]
+[FEN "7k/5ppp/8/8/8/8/5PPP/R5K1 b - - 0 1"]
 [Orientation "white"]
 
-1. Ra8# { Back-rank mate. Fixture chapter two. } *
+1... Kg8 2. Ra8# { Back-rank mate. Fixture chapter two. } *
 
 [Event "fixture-3"]
 [Site "?"]
@@ -32,7 +32,7 @@
 [Black "?"]
 [Result "*"]
 [SetUp "1"]
-[FEN "r1bqkbnr/pppp1ppp/2n5/4p3/3PP3/5N2/PPP2PPP/RNBQKB1R b KQkq - 0 3"]
+[FEN "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"]
 [Orientation "black"]
 
-3... exd4 { Take the pawn. Fixture chapter three, Black to move. } 4. Nxd4 *
+3. d4 exd4 { Take the pawn. Fixture chapter three, Black to move. } 4. Nxd4 *
