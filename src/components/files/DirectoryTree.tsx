@@ -24,7 +24,9 @@ import {
   createContext,
   useContext,
 } from "react";
+import { useMediaQuery } from "@mantine/hooks";
 import { activeTabAtom, deckAtomFamily, tabsAtom, expandedDirectoriesAtom } from "@/state/atoms";
+import { STACKED_LAYOUT_QUERY } from "@/utils/breakpoints";
 import { openFile } from "@/utils/files";
 import classes from "./DirectoryTree.module.css";
 import type { Directory, FileMetadata } from "./file";
@@ -286,6 +288,11 @@ function DirectoryNode({
   const suppressClickRef = useRef(false);
   const dragStartPointRef = useRef<{ x: number; y: number } | null>(null);
   const dragContext = useContext(DragContext);
+  // On a phone a double tap zooms instead of firing dblclick, and long press does not
+  // open the context menu on iOS, so a single tap has to open the file.
+  const tapToOpen = useMediaQuery(STACKED_LAYOUT_QUERY, false, {
+    getInitialValueInEffect: false,
+  });
 
   const [isDraggingNode, setIsDraggingNode] = useState(false);
 
@@ -407,6 +414,9 @@ function DirectoryNode({
     <>
       <Draggable
         position={{ x: 0, y: 0 }}
+        // Draggable cancels touchstart, which swallows the tap's click and the list's
+        // scrolling, so dragging files into folders is a pointer-only feature.
+        disabled={tapToOpen}
         onStart={onDragStart}
         onDrag={onDragMove}
         onStop={onDragStop}
@@ -435,6 +445,8 @@ function DirectoryNode({
             if (node.type === "directory") {
               toggleExpand(e);
               setSelectedFile(node);
+            } else if (tapToOpen) {
+              void handleOpenFile(node);
             } else {
               setSelectedFile(node);
             }

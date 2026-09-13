@@ -13,7 +13,7 @@ import {
   Title,
   Tooltip,
 } from "@mantine/core";
-import { useHotkeys, useToggle } from "@mantine/hooks";
+import { useHotkeys, useMediaQuery, useToggle } from "@mantine/hooks";
 import {
   IconFileDescription,
   IconFilePlus,
@@ -26,6 +26,7 @@ import { readDir, remove } from "@tauri-apps/plugin-fs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import useSWR from "swr";
+import { STACKED_LAYOUT_QUERY } from "@/utils/breakpoints";
 import { capitalize } from "@/utils/format";
 import ConfirmModal from "../common/ConfirmModal";
 import OpenFolderButton from "../common/OpenFolderButton";
@@ -85,6 +86,9 @@ function FilesPage() {
   const [selected, setSelected] = useState<Entry | null>(null);
   const [games, setGames] = useState<Map<number, string>>(new Map());
   const [filter, setFilter] = useState<FileType | null>(null);
+  const stacked = useMediaQuery(STACKED_LAYOUT_QUERY, false, {
+    getInitialValueInEffect: false,
+  });
 
   const [deleteModal, toggleDeleteModal] = useToggle();
   const [createModal, toggleCreateModal] = useToggle();
@@ -257,7 +261,18 @@ function FilesPage() {
         <OpenFolderButton folder={documentDir} />
       </Group>
 
-      <Group grow flex={1} style={{ overflow: "hidden" }} px="md" pb="md">
+      <Group
+        grow={!stacked}
+        flex={1}
+        align={stacked ? "stretch" : undefined}
+        style={{
+          overflow: stacked ? "auto" : "hidden",
+          flexDirection: stacked ? "column" : undefined,
+          flexWrap: stacked ? "nowrap" : undefined,
+        }}
+        px="md"
+        pb="md"
+      >
         <Paper withBorder style={{ borderWidth: 2 }} h="100%">
           <Stack ref={dropzoneRef} gap={0} h="100%" style={{ overflow: "hidden" }}>
             <Group p="xs" gap="xs">

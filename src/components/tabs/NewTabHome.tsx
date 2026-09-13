@@ -299,6 +299,12 @@ export default function NewTabHome({ id }: { id: string }) {
       description: t("Home.Card.Puzzle.Desc"),
       label: t("Home.Card.Puzzle.Button"),
       onClick: () => {
+        // The web build has no puzzle database; its puzzles are puzzle-type PGN files,
+        // drilled from the board's practice tab, so the card leads to the Files page.
+        if (isWeb) {
+          void navigate({ to: "/files" });
+          return;
+        }
         setTabs((prev) => {
           const tab = prev.find((t) => t.value === id);
           if (!tab) return prev;
@@ -309,11 +315,6 @@ export default function NewTabHome({ id }: { id: string }) {
       },
     },
   ];
-
-  // Puzzle training is out of scope for the web build; play-versus-engine is not.
-  const visibleCards = cards.filter(
-    (card) => !(isWeb && card.title === t("Home.Card.Puzzle.Title")),
-  );
 
   return (
     <>
@@ -326,7 +327,7 @@ export default function NewTabHome({ id }: { id: string }) {
       <CreateRepertoireModal opened={openRepertoireModal} setOpened={setOpenRepertoireModal} />
       <Stack gap="lg" pt="sm">
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 5 }}>
-          {visibleCards.map((card) => (
+          {cards.map((card) => (
             <Card shadow="sm" p="lg" radius="md" withBorder key={card.title}>
               <Stack align="center" h="100%" justify="space-between">
                 {card.icon}
