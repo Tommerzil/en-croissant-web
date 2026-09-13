@@ -12,12 +12,15 @@ const f = fsrs(params);
 export const positionSchema = z.object({
     fen: z.string(),
     answer: z.string(),
+    // A puzzle card's whole solution, opponent replies included. Repertoire cards have none.
+    line: z.string().array().optional(),
     card: z.object({}).passthrough(),
 });
 
 export type Position = {
     fen: string;
     answer: string;
+    line?: string[];
     card: Card;
 };
 

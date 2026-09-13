@@ -6,6 +6,9 @@
  * decide WHICH chapter and card comes next; grading and persistence stay per chapter.
  * Kept free of React so it can be unit-tested.
  */
+import { createEmptyCard } from "ts-fsrs";
+import type { PracticeData } from "@/state/atoms";
+import type { TreeNode } from "@/utils/treeReducer";
 import { getStats, type Position } from "./opening";
 
 export type ChapterCard = {
@@ -82,4 +85,78 @@ export function sumStats(decks: Position[][]): ReturnType<typeof getStats> {
         }
     }
     return total;
+}
+
+/**
+ * The single card of a puzzle chapter: the first mainline node where the player is to
+ * move, with every mainline move from there to the end, opponent replies included.
+ * Variations are ignored, so moves explored after a puzzle can never become cards.
+ * Returns null when the player never moves.
+ */
+export function buildPuzzleCard(root: TreeNode, color: "white" | "black"): Position | null {
+    const line: string[] = [];
+    let cardNode: TreeNode | null = null;
+    let node = root;
+    while (node.children.length > 0) {
+        const next = node.children[0];
+        const playerToMove = (node.halfMoves % 2 === 0) === (color === "white");
+        if (!cardNode && playerToMove) cardNode = node;
+        if (cardNode) {
+            if (!next.san) return null;
+            line.push(next.san);
+        }
+        node = next;
+    }
+    if (!cardNode || line.length === 0) return null;
+    return { fen: cardNode.fen, answer: line[0], line, card: createEmptyCard() };
+}
+
+function sameLine(a: string[] | undefined, b: string[] | undefined): boolean {
+    return !!a && !!b && a.length === b.length && a.every((san, i) => san === b[i]);
+}
+
+/**
+ * The deck a puzzle chapter should hold, or null when the stored one is already right.
+ * A stored deck is right when it is exactly the fresh card (same position and line).
+ * Anything else - several per-move cards, a card without a line, a deck left behind by
+ * a regenerated file - is replaced by the fresh card, keeping the scheduling state and
+ * logs of a stored card at the same position when there is one.
+ */
+export function reconcilePuzzleDeck(
+    stored: PracticeData,
+    fresh: Position | null,
+): PracticeData | null {
+    if (!fresh) {
+        return stored.positions.length === 0 ? null : { positions: [], logs: [] };
+    }
+    const [only] = stored.positions;
+    if (
+        stored.positions.length === 1 &&
+        only.fen === fresh.fen &&
+        sameLine(only.line, fresh.line)
+    ) {
+        return null;
+    }
+    const keep = stored.positions.find((p) => p.fen === fresh.fen);
+    if (!keep) return { positions: [fresh], logs: [] };
+    return { positions: [{ ...keep, answer: fresh.answer, line: fresh.line }], logs: stored.logs };
+}
+
+export type PuzzleStatus = "idle" | "loading" | "solving" | "replying" | "solved" | "revealed";
+
+/**
+ * What a move played on a puzzle file's board means. "accept": the next move of the line.
+ * "miss": a wrong move while solving. "ignore": a card is loading or the opponent's reply
+ * is on its way; not a miss. "free": no puzzle is running or it is over, anything goes
+ * (the next puzzle reloads its chapter from the file).
+ */
+export function puzzleMoveDecision(
+    line: string[],
+    step: number,
+    status: PuzzleStatus,
+    san: string,
+): "accept" | "miss" | "ignore" | "free" {
+    if (status === "idle" || status === "solved" || status === "revealed") return "free";
+    if (status !== "solving") return "ignore";
+    return line[step] === san ? "accept" : "miss";
 }

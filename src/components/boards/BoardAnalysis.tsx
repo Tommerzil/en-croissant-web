@@ -81,10 +81,12 @@ function BoardAnalysis() {
     });
   }, [setCurrentTab, currentTab, documentDir, store]);
   useEffect(() => {
-    if (hasPersistentOrigin && autoSave && dirty) {
+    // Puzzle files are never saved automatically: moves made while practising or
+    // exploring stay out of the file, and each puzzle reloads its chapter from disk.
+    if (hasPersistentOrigin && autoSave && dirty && tabFile?.metadata.type !== "puzzle") {
       saveFile();
     }
-  }, [hasPersistentOrigin, saveFile, autoSave, dirty]);
+  }, [hasPersistentOrigin, saveFile, autoSave, dirty, tabFile]);
 
   const addGame = useCallback(() => {
     if (!tabFile) return;

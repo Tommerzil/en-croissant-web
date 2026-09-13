@@ -512,6 +512,13 @@ export const practiceStateFamily = atomFamily((_tab: string) =>
 );
 export const practiceStateAtom = tabValue(practiceStateFamily);
 
+// Set by the puzzle practice panel while it is mounted. Board.tsx hands every practice
+// move to it instead of checking the move against a single deck card. Wrapped in an
+// object because jotai treats a function passed to `set` as an updater.
+export type PuzzleMoveHandler = { decide: (san: string) => "accept" | "reject" | "free" };
+const puzzleMoveHandlerFamily = atomFamily((_tab: string) => atom<PuzzleMoveHandler | null>(null));
+export const puzzleMoveHandlerAtom = tabValue(puzzleMoveHandlerFamily);
+
 export type PracticeSessionStats = {
     mode: "anki" | "full";
     remainingPositions: number[];

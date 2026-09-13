@@ -39,6 +39,7 @@ import {
   practiceCardStartTimeAtom,
   practiceSessionStatsAtom,
   practiceStateAtom,
+  puzzleMoveHandlerAtom,
   showArrowsAtom,
   showConsecutiveArrowsAtom,
   showCoordinatesAtom,
@@ -186,11 +187,24 @@ function Board({
   const setPracticeState = useSetAtom(practiceStateAtom);
   const [sessionStats, setSessionStats] = useAtom(practiceSessionStatsAtom);
   const cardStartTime = useAtomValue(practiceCardStartTimeAtom);
+  const puzzleHandler = useAtomValue(puzzleMoveHandlerAtom);
+  // Bumped when a puzzle move is rejected. Nothing in the tree changed, so without a
+  // render chessground would keep showing the piece on the square it was dropped on.
+  const [, setRejectedMoves] = useState(0);
 
   async function makeMove(move: NormalMove) {
     if (!pos) return;
     const san = makeSan(pos, move);
-    if (practicing) {
+    if (practicing && puzzleHandler) {
+      // A puzzle set checks its own multi-move line (PuzzlePracticePanel). A rejected
+      // move is never written to the tree; re-rendering puts the piece back.
+      if (puzzleHandler.decide(san) === "reject") {
+        setRejectedMoves((n) => n + 1);
+        return;
+      }
+      storeMakeMove({ payload: move });
+      setPendingMove(null);
+    } else if (practicing) {
       const c = deck.positions.find((c) => c.fen === currentNode.fen);
       if (!c) {
         return;
@@ -335,7 +349,10 @@ function Board({
     !!headers.white_time_control ||
     !!headers.black_time_control;
 
-  const practiceLock = !!practicing && !deck.positions.find((c) => c.fen === currentNode.fen);
+  // A puzzle handler decides for itself which moves to take, including free moves after
+  // the puzzle has ended, so the single-card lock does not apply to it.
+  const practiceLock =
+    !!practicing && !puzzleHandler && !deck.positions.find((c) => c.fen === currentNode.fen);
 
   const movableColor: "white" | "black" | "both" | undefined = useMemo(() => {
     return practiceLock

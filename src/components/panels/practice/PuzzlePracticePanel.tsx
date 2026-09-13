@@ -33,26 +33,27 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "r
 import { useHotkeys } from "react-hotkeys-hook";
 import { useTranslation } from "react-i18next";
 import { formatDate } from "ts-fsrs";
-import { formatNumber } from "@/utils/format";
 import { useStore } from "zustand";
 import { commands } from "@/bindings";
 import Comment from "@/components/common/Comment";
 import ConfirmModal from "@/components/common/ConfirmModal";
 import { TreeStateContext } from "@/components/common/TreeStateContext";
 import {
-  buildFromTree,
   formatReviewInterval,
   getNextReviewTimes,
   type Position,
-  syncDeck,
   updateCardPerformance,
 } from "@/components/files/opening";
-// PUZZLE: cross-chapter card selection (Task 1).
+// PUZZLE: cross-chapter card selection, one card per puzzle, and move decisions.
 import {
+  buildPuzzleCard,
   type ChapterCard,
   flattenDecks,
   fullOrder,
   nextDueCard,
+  type PuzzleStatus,
+  puzzleMoveDecision,
+  reconcilePuzzleDeck,
   sumStats,
 } from "@/components/files/puzzleDeck";
 import {
@@ -68,6 +69,7 @@ import {
   practiceSessionStatsAtom,
   practiceStateAtom,
   practiceAutoDifficultyAtom,
+  puzzleMoveHandlerAtom,
 } from "@/state/atoms";
 import { parsePGN } from "@/utils/chess";
 import { getTabFile, getTabGameNumber } from "@/utils/tabs";
@@ -78,6 +80,9 @@ import { unwrap } from "@/utils/unwrap";
 // per chapter in the web build; one after another, ~900 chapters took a minute or two on
 // every mount.
 const CHAPTER_LOAD_WORKERS = 8;
+
+// PUZZLE: pause before the opponent's reply, and between moves of a revealed solution.
+const REPLY_DELAY_MS = 400;
 
 /**
  * Practice panel for puzzle sets: a copy of PracticePanel that drills every chapter of
@@ -92,11 +97,9 @@ function PuzzlePracticePanel() {
 
   const store = useContext(TreeStateContext)!;
   const root = useStore(store, (s) => s.root);
-  const headers = useStore(store, (s) => s.headers);
   const goToMove = useStore(store, (s) => s.goToMove);
   const setPracticePath = useStore(store, (s) => s.setPracticePath);
   const currentFen = useStore(store, (s) => s.currentNode().fen);
-  const currentComment = useStore(store, (s) => s.currentNode().comment);
 
   // PUZZLE: writable, because presenting a card in another chapter moves the tab's
   // game number (Board.tsx validates against the deck of that game number).
@@ -190,22 +193,15 @@ function PuzzlePracticePanel() {
             if (cancelled) return;
             // PUZZLE: no await between reading the existing deck and writing it. That
             // ordering is what keeps a concurrent write to the same deck from being lost.
+            // PUZZLE: one card per chapter holding the whole solution line. Stored decks
+            // from before (one card per move) are replaced; see reconcilePuzzleDeck.
             const orientation = tree.headers.orientation || "white";
-            const start = tree.headers.start || [];
             const deckAtom = deckAtomFamily({ file: tabFile.path, game: i });
-            const existing = jotai.get(deckAtom);
-            if (existing.positions.length === 0) {
-              const fresh = buildFromTree(tree.root, orientation, start);
-              if (fresh.length > 0) jotai.set(deckAtom, { positions: fresh, logs: [] });
-            } else {
-              const { positions, added, removed } = syncDeck(
-                existing.positions,
-                tree.root,
-                orientation,
-                start,
-              );
-              if (added > 0 || removed > 0) jotai.set(deckAtom, { ...existing, positions });
-            }
+            const next = reconcilePuzzleDeck(
+              jotai.get(deckAtom),
+              buildPuzzleCard(tree.root, orientation),
+            );
+            if (next) jotai.set(deckAtom, next);
           } catch (e) {
             console.error(`PuzzlePracticePanel: chapter ${i + 1} could not be read`, e);
             skipped++;
@@ -230,42 +226,9 @@ function PuzzlePracticePanel() {
     // clears it (and bumps decksVersion) to force a reload without looping.
   }, [tabFile, numChapters, decksVersion, chaptersLoaded]);
 
-  const [syncMessage, setSyncMessage] = useState<{
-    added: number;
-    removed: number;
-  } | null>(null);
-  const deckPositionsRef = useRef(deck.positions);
-  deckPositionsRef.current = deck.positions;
-  const lastSyncedTreeRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const treeFingerprint = JSON.stringify(root);
-    if (lastSyncedTreeRef.current === treeFingerprint) return;
-
-    const orientation = headers.orientation || "white";
-    const start = headers.start || [];
-
-    if (deckPositionsRef.current.length === 0) {
-      const newDeck = buildFromTree(root, orientation, start);
-      if (newDeck.length > 0) {
-        setDeck({ positions: newDeck, logs: [] });
-      }
-    } else {
-      // Sync existing deck with tree changes
-      const { positions, added, removed } = syncDeck(
-        deckPositionsRef.current,
-        root,
-        orientation,
-        start,
-      );
-      if (added > 0 || removed > 0) {
-        setDeck((prev) => ({ ...prev, positions }));
-        setSyncMessage({ added, removed });
-        setTimeout(() => setSyncMessage(null), 5000);
-      }
-    }
-    lastSyncedTreeRef.current = treeFingerprint;
-  }, [root, headers, setDeck]);
+  // PUZZLE: no tree-sync effect. It exists in PracticePanel so a repertoire being edited
+  // gains cards; a puzzle set is never edited in the app, and its cards come only from the
+  // loader above. Kept, it would turn moves explored after a puzzle into cards.
 
   // PUZZLE: stats over the whole file. `deck` and `chaptersLoaded` are dependencies so
   // grading the open chapter and the initial load both refresh it.
@@ -279,22 +242,78 @@ function PuzzlePracticePanel() {
   const setCardStartTime = useSetAtom(practiceCardStartTimeAtom);
   const practiceAutoDifficulty = useAtomValue(practiceAutoDifficultyAtom);
 
-  // PUZZLE: after a correct move the board is advanced onto the solution node, so
-  // currentNode().comment already works. After a WRONG move Board.tsx never plays it
-  // (:202-213), so the board stays on the card node, which has no comment - the comment
-  // lives on the card's answer child. Look that child up by SAN from the card node
-  // (found via practiceState.currentFen) so both answer panels can show it, falling back
-  // to currentNode().comment so nothing regresses when there is no pending answer.
-  const answerComment = useMemo(() => {
-    if (!practiceState.currentFen || !practiceState.answer) return currentComment;
-    const cardPath = findFen(practiceState.currentFen, root);
-    const cardNode = getNodeAtPath(root, cardPath);
-    const answerChild = cardNode.children.find((c) => c.san === practiceState.answer);
-    return answerChild?.comment ?? currentComment;
-  }, [root, practiceState.currentFen, practiceState.answer, currentComment]);
+  // PUZZLE: a puzzle is solved move by move against its whole line. Board.tsx hands every
+  // practice move to `decide` below, between renders, so what it reads lives in refs;
+  // `puzzle` mirrors those refs for rendering.
+  const statusRef = useRef<PuzzleStatus>("idle");
+  const stepRef = useRef(0);
+  const missedRef = useRef(false);
+  const lineRef = useRef<string[]>([]);
+  const cardRef = useRef<{ fen: string; path: number[]; startTime: number } | null>(null);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const [puzzle, setPuzzle] = useState<{
+    status: PuzzleStatus;
+    missed: boolean;
+    step: number;
+    path: number[];
+  }>({ status: "idle", missed: false, step: 0, path: [] });
 
-  // PUZZLE: declared before switchChapter, whose failure path clears it.
-  const pendingRef = useRef<ChapterCard | null>(null);
+  const syncPuzzle = useCallback((status: PuzzleStatus) => {
+    statusRef.current = status;
+    setPuzzle({
+      status,
+      missed: missedRef.current,
+      step: stepRef.current,
+      path: cardRef.current?.path ?? [],
+    });
+  }, []);
+
+  const clearTimers = useCallback(() => {
+    for (const timer of timersRef.current) clearTimeout(timer);
+    timersRef.current = [];
+  }, []);
+
+  const after = useCallback((ms: number, fn: () => void) => {
+    timersRef.current.push(setTimeout(fn, ms));
+  }, []);
+
+  // PUZZLE: the node reached after `k` moves of the line. The line is the chapter's
+  // mainline, so each step is child 0.
+  const pathAfter = useCallback(
+    (k: number) => [...(cardRef.current?.path ?? []), ...Array<number>(k).fill(0)],
+    [],
+  );
+
+  // PUZZLE: comments of every mainline node from the card to the end of the line, shown
+  // once the puzzle is over. A merged chain has one per part.
+  const puzzleComments = useMemo(() => {
+    if (puzzle.status !== "solved" && puzzle.status !== "revealed") return [];
+    const out: string[] = [];
+    let node = getNodeAtPath(root, puzzle.path);
+    for (let k = 0; node && k < lineRef.current.length; k++) {
+      node = node.children[0];
+      if (node?.comment) out.push(node.comment);
+    }
+    return out;
+  }, [root, puzzle.status, puzzle.path]);
+
+  const expectedFen =
+    puzzle.status === "idle"
+      ? undefined
+      : getNodeAtPath(root, [...puzzle.path, ...Array<number>(puzzle.step).fill(0)])?.fen;
+
+  // PUZZLE: a finished puzzle is graded once. Only a clean solve reaches the rating
+  // buttons, the auto-advance and the full-mode correct panel.
+  const solvedClean =
+    practiceState.phase === "correct" && puzzle.status === "solved" && !puzzle.missed;
+  const puzzleFailed =
+    practiceState.phase === "correct" &&
+    (puzzle.status === "revealed" || (puzzle.status === "solved" && puzzle.missed));
+
+  // PUZZLE: declared before switchChapter, whose failure path clears it. `loaded` is set
+  // when the chapter's tree is replaced, so a reload of the open chapter cannot present
+  // the card on the tree it is about to replace.
+  const pendingRef = useRef<(ChapterCard & { loaded: boolean }) | null>(null);
 
   // PUZZLE: same mechanism as the info panel's game pager, without the dirty check
   // (a puzzle chapter is never edited during a drill).
@@ -308,6 +327,7 @@ function PuzzlePracticePanel() {
         const data = unwrap(await commands.readGames(tabFile.path, chapter, chapter));
         if (data[0] === undefined) throw new Error("the file has no such chapter");
         const tree = await parsePGN(data[0]);
+        if (pendingRef.current?.chapter === chapter) pendingRef.current.loaded = true;
         setState(tree);
         setCurrentTab((prev) => {
           if (prev.gameOrigin.kind !== "file" && prev.gameOrigin.kind !== "temp_file") return prev;
@@ -316,6 +336,8 @@ function PuzzlePracticePanel() {
       } catch (e) {
         console.error(`PuzzlePracticePanel: chapter ${chapter + 1} could not be opened`, e);
         pendingRef.current = null;
+        clearTimers();
+        syncPuzzle("idle");
         setPracticeState({ phase: "idle" });
         setPracticePath(null);
         setShowComments(true);
@@ -330,6 +352,8 @@ function PuzzlePracticePanel() {
       tabFile,
       setState,
       setCurrentTab,
+      clearTimers,
+      syncPuzzle,
       setPracticeState,
       setPracticePath,
       setShowComments,
@@ -340,29 +364,40 @@ function PuzzlePracticePanel() {
   const currentChapter = getTabGameNumber(currentTab);
 
   const presentCard = useCallback(
-    (fen: string) => {
-      const path = findFen(fen, root);
+    (target: ChapterCard) => {
+      const path = findFen(target.fen, root);
+      const card = readAllDecks()[target.chapter]?.[target.index];
+      clearTimers();
       goToMove(path);
       setPracticePath(path);
       // PUZZLE: pieces stay visible; this is a tactic, not blind recall.
       setShowComments(false);
       setEvalOpen(false);
-      setCardStartTime(Date.now());
-      setPracticeState({ phase: "waiting", currentFen: fen });
+      const startTime = Date.now();
+      setCardStartTime(startTime);
+      lineRef.current = card?.line ?? (card ? [card.answer] : []);
+      stepRef.current = 0;
+      missedRef.current = false;
+      cardRef.current = { fen: target.fen, path, startTime };
+      syncPuzzle("solving");
+      setPracticeState({ phase: "waiting", currentFen: target.fen });
     },
     [
       root,
+      readAllDecks,
+      clearTimers,
       goToMove,
       setPracticePath,
       setShowComments,
       setEvalOpen,
       setCardStartTime,
+      syncPuzzle,
       setPracticeState,
     ],
   );
 
-  // PUZZLE: a card in another chapter is presented only once that chapter's tree has
-  // replaced `root`, which happens asynchronously after switchChapter.
+  // PUZZLE: a card is presented only once its chapter has been read into `root`, which
+  // happens asynchronously after switchChapter.
   useEffect(() => {
     // PUZZLE: only a drill still waiting for this card may present it. A Stop or Reset
     // while the chapter loads puts the phase back to idle, and the late load must not
@@ -370,14 +405,14 @@ function PuzzlePracticePanel() {
     // forgets to.
     if (practiceState.phase !== "waiting") return;
     const pending = pendingRef.current;
-    if (!pending || pending.chapter !== currentChapter) return;
+    if (!pending || !pending.loaded || pending.chapter !== currentChapter) return;
     if (findFen(pending.fen, root).length === 0 && root.fen !== pending.fen) return;
     pendingRef.current = null;
-    presentCard(pending.fen);
+    presentCard(pending);
   }, [root, currentChapter, presentCard, practiceState.phase]);
 
-  // PUZZLE: picks the next card across every chapter, then switches the tab to that
-  // chapter when it is not the open one.
+  // PUZZLE: picks the next card across every chapter, then reloads that chapter from the
+  // file, even when it is the open one, so moves explored after the last puzzle are gone.
   const newPractice = useCallback(
     (stats?: Partial<PracticeSessionStats>) => {
       const all = flattenDecks(readAllDecks());
@@ -393,9 +428,11 @@ function PuzzlePracticePanel() {
         target = nextDueCard(all);
       }
 
+      clearTimers();
       if (!target) {
         // PUZZLE: no card left, so no chapter load may present one later.
         pendingRef.current = null;
+        syncPuzzle("idle");
         setPracticeState({ phase: "idle" });
         setPracticePath(null);
         setShowComments(true);
@@ -403,22 +440,19 @@ function PuzzlePracticePanel() {
         return;
       }
 
-      if (target.chapter === currentChapter) {
-        presentCard(target.fen);
-      } else {
-        pendingRef.current = target;
-        // PUZZLE: leave "correct" now, or the auto-advance effect re-arms its 300ms timer
-        // (and the rating hotkeys stay live) for as long as the chapter takes to load.
-        setPracticeState({ phase: "waiting", currentFen: target.fen });
-        void switchChapter(target.chapter);
-      }
+      pendingRef.current = { ...target, loaded: false };
+      syncPuzzle("loading");
+      // PUZZLE: leave "correct" now, or the auto-advance effect re-arms its 300ms timer
+      // (and the rating hotkeys stay live) for as long as the chapter takes to load.
+      setPracticeState({ phase: "waiting", currentFen: target.fen });
+      void switchChapter(target.chapter);
     },
     [
       readAllDecks,
       sessionStats.mode,
       sessionStats.remainingPositions,
-      currentChapter,
-      presentCard,
+      clearTimers,
+      syncPuzzle,
       switchChapter,
       setPracticeState,
       setPracticePath,
@@ -426,6 +460,143 @@ function PuzzlePracticePanel() {
       setEvalOpen,
     ],
   );
+
+  // PUZZLE: ends the puzzle. The panel sets the practice state itself, because Board.tsx
+  // no longer does for puzzle files. A miss or a revealed solution grades the card
+  // "again" here, once; full practice never grades, as before.
+  const finishPuzzle = useCallback(
+    (outcome: "solved" | "revealed") => {
+      const card = cardRef.current;
+      if (!card) return;
+      clearTimers();
+      syncPuzzle(outcome);
+      // PUZZLE: free the practice path, so the player can step through the solution and
+      // explore past the card.
+      setPracticePath(null);
+      setShowComments(true);
+      setEvalOpen(true);
+      setPracticeState({
+        phase: "correct",
+        currentFen: card.fen,
+        answer: lineRef.current[0],
+        positionIndex: 0,
+        timeTaken: Date.now() - card.startTime,
+      });
+      const failed = outcome === "revealed" || missedRef.current;
+      if (failed && sessionStats.mode !== "full" && tabFile) {
+        const stored = getDefaultStore().get(
+          deckAtomFamily({ file: tabFile.path, game: currentChapter }),
+        ).positions[0];
+        if (stored) updateCardPerformance(setDeck, 0, stored.card, 1);
+      }
+    },
+    [
+      clearTimers,
+      syncPuzzle,
+      setPracticePath,
+      setShowComments,
+      setEvalOpen,
+      setPracticeState,
+      sessionStats.mode,
+      tabFile,
+      currentChapter,
+      setDeck,
+    ],
+  );
+
+  // PUZZLE: Board.tsx's view of the puzzle. Reassigned every render so it always calls
+  // the current callbacks; the handler registered below only forwards to it.
+  const decideRef = useRef<(san: string) => "accept" | "reject" | "free">(() => "free");
+  decideRef.current = (san) => {
+    const decision = puzzleMoveDecision(lineRef.current, stepRef.current, statusRef.current, san);
+    if (decision === "free") return "free";
+    if (decision === "ignore") return "reject";
+    // PUZZLE: a move made away from the puzzle's position (after navigating) is neither
+    // right nor wrong; "Go back to position" returns the player.
+    const expected = getNodeAtPath(store.getState().root, pathAfter(stepRef.current));
+    if (store.getState().currentNode().fen !== expected?.fen) return "reject";
+    if (decision === "miss") {
+      missedRef.current = true;
+      syncPuzzle("solving");
+      return "reject";
+    }
+    const played = stepRef.current + 1;
+    stepRef.current = played;
+    if (played >= lineRef.current.length) {
+      // PUZZLE: after Board.tsx has played the final move.
+      after(0, () => finishPuzzle("solved"));
+      return "accept";
+    }
+    syncPuzzle("replying");
+    after(REPLY_DELAY_MS, () => {
+      // PUZZLE: the reply is already in the tree; moving onto it plays it without marking
+      // the file changed, and lands on the right node even if the player navigated.
+      stepRef.current = played + 1;
+      goToMove(pathAfter(played + 1));
+      syncPuzzle("solving");
+    });
+    return "accept";
+  };
+
+  const setPuzzleHandler = useSetAtom(puzzleMoveHandlerAtom);
+  useEffect(() => {
+    setPuzzleHandler({ decide: (san) => decideRef.current(san) });
+    return () => {
+      setPuzzleHandler(null);
+      clearTimers();
+      statusRef.current = "idle";
+    };
+  }, [setPuzzleHandler, clearTimers]);
+
+  // PUZZLE: plays the rest of the line at the reply pace and ends the puzzle as revealed.
+  const showSolution = useCallback(() => {
+    if (statusRef.current !== "solving" && statusRef.current !== "replying") return;
+    clearTimers();
+    const from = stepRef.current;
+    const total = lineRef.current.length;
+    goToMove(pathAfter(from));
+    syncPuzzle("replying");
+    for (let k = from + 1; k <= total; k++) {
+      after((k - from) * REPLY_DELAY_MS, () => {
+        stepRef.current = k;
+        goToMove(pathAfter(k));
+        if (k === total) finishPuzzle("revealed");
+      });
+    }
+  }, [clearTimers, goToMove, pathAfter, syncPuzzle, after, finishPuzzle]);
+
+  // PUZZLE: Stop from any puzzle panel. The open chapter is reloaded from the file, which
+  // drops moves explored after the puzzle.
+  const stopPractice = useCallback(() => {
+    pendingRef.current = null;
+    clearTimers();
+    syncPuzzle("idle");
+    setPracticeState({ phase: "idle" });
+    setPracticePath(null);
+    setInvisible(false);
+    setShowComments(true);
+    setEvalOpen(true);
+    setSessionStats({
+      mode: "anki",
+      remainingPositions: [],
+      correct: 0,
+      incorrect: 0,
+      streak: 0,
+      bestStreak: 0,
+    });
+    void switchChapter(currentChapter);
+  }, [
+    clearTimers,
+    syncPuzzle,
+    setPracticeState,
+    setPracticePath,
+    setInvisible,
+    setShowComments,
+    setEvalOpen,
+    setSessionStats,
+    switchChapter,
+    currentChapter,
+  ]);
 
   // PUZZLE: one full-practice step after a correct answer. The auto-advance timer below
   // and the "Next puzzle" button both make exactly this update.
@@ -442,12 +613,12 @@ function PuzzlePracticePanel() {
   }, [sessionStats.remainingPositions, setSessionStats, newPractice]);
 
   useEffect(() => {
-    if (practiceState.phase === "correct") {
+    if (solvedClean) {
       // PUZZLE: a puzzle with a comment never auto-advances, in either mode: the comment
       // explains what happened in the game and would flash past in 300ms. Anki mode shows
       // the grade buttons (grading advances); full mode shows the correct panel with a
       // "Next puzzle" button. Without a comment nothing changes.
-      if (answerComment) return;
+      if (puzzleComments.length > 0) return;
       if (sessionStats.mode === "full") {
         const timer = setTimeout(advanceFullCorrect, 300);
         return () => clearTimeout(timer);
@@ -470,7 +641,7 @@ function PuzzlePracticePanel() {
       }
     }
   }, [
-    practiceState.phase,
+    solvedClean,
     practiceState.positionIndex,
     sessionStats.mode,
     newPractice,
@@ -478,21 +649,39 @@ function PuzzlePracticePanel() {
     practiceAutoDifficulty,
     deck.positions,
     setDeck,
-    answerComment,
+    puzzleComments.length,
     advanceFullCorrect,
   ]);
 
   // PUZZLE: the full-practice correct panel's "Next puzzle" button and Space key.
   function nextPuzzle() {
-    if (practiceState.phase !== "correct" || sessionStats.mode !== "full") return;
+    if (!solvedClean || sessionStats.mode !== "full") return;
     advanceFullCorrect();
   }
 
+  // PUZZLE: "Next puzzle" after a miss or a revealed solution. The card was already
+  // graded when the puzzle ended; this only counts it and moves on.
+  function nextAfterFailure() {
+    if (!puzzleFailed) return;
+    if (sessionStats.mode === "full") {
+      const remainingPositions = sessionStats.remainingPositions.slice(1);
+      setSessionStats((prev) => ({
+        ...prev,
+        remainingPositions,
+        incorrect: prev.incorrect + 1,
+        streak: 0,
+      }));
+      newPractice({ remainingPositions, mode: "full" });
+    } else {
+      setSessionStats((prev) => ({ ...prev, incorrect: prev.incorrect + 1, streak: 0 }));
+      newPractice();
+    }
+  }
+
   function handleQualityRating(grade: 1 | 2 | 3 | 4) {
-    // PUZZLE: full practice never grades. Its correct panel now stays up for a puzzle
-    // with a comment, so the rating keys must not grade (or re-present) the card there.
+    // PUZZLE: full practice never grades, and only a clean solve is rated.
     if (sessionStats.mode === "full") return;
-    if (practiceState.phase !== "correct" || practiceState.positionIndex === undefined) return;
+    if (!solvedClean || practiceState.positionIndex === undefined) return;
 
     const { positionIndex } = practiceState;
     const card = deck.positions[positionIndex].card;
@@ -535,18 +724,8 @@ function PuzzlePracticePanel() {
     newPractice(stats);
   }
 
-  function skipCard() {
-    if (sessionStats.mode === "full" && sessionStats.remainingPositions.length > 0) {
-      const remainingPositions = sessionStats.remainingPositions.slice(1);
-      setSessionStats((prev) => ({ ...prev, remainingPositions }));
-      newPractice({ remainingPositions });
-    } else {
-      newPractice();
-    }
-  }
-
   // PUZZLE: the rating keys are off in full practice, which never grades.
-  const ratingKeysEnabled = practiceState.phase === "correct" && sessionStats.mode !== "full";
+  const ratingKeysEnabled = solvedClean && sessionStats.mode !== "full";
   useHotkeys("1", () => handleQualityRating(1), {
     enabled: ratingKeysEnabled,
   });
@@ -559,13 +738,23 @@ function PuzzlePracticePanel() {
   useHotkeys("4", () => handleQualityRating(4), {
     enabled: ratingKeysEnabled,
   });
-  useHotkeys("space", () => skipCard(), {
-    enabled: practiceState.phase === "incorrect",
+  useHotkeys("space", () => nextAfterFailure(), {
+    enabled: puzzleFailed,
   });
   // PUZZLE: Space is "Next puzzle" on the full-practice correct panel.
   useHotkeys("space", () => nextPuzzle(), {
-    enabled: practiceState.phase === "correct" && sessionStats.mode === "full" && !!answerComment,
+    enabled: solvedClean && sessionStats.mode === "full" && puzzleComments.length > 0,
   });
+
+  const commentsBox = puzzleComments.length > 0 && (
+    <Paper p="xs" withBorder w="100%">
+      <Stack gap="xs">
+        {puzzleComments.map((comment, i) => (
+          <Comment key={i} comment={comment} />
+        ))}
+      </Stack>
+    </Paper>
+  );
 
   const [positionsOpen, setPositionsOpen] = useToggle();
   const [logsOpen, setLogsOpen] = useToggle();
@@ -593,7 +782,8 @@ function PuzzlePracticePanel() {
           <Tabs.Tab value="train">{t("Board.Practice.Train")}</Tabs.Tab>
         </Tabs.List>
 
-        <Tabs.Panel value="train" style={{ overflow: "hidden" }}>
+        {/* PUZZLE: scrolls, because a chain's comments push "Next puzzle" below the fold. */}
+        <Tabs.Panel value="train" style={{ overflow: "auto" }}>
           <Stack p="sm" gap="md">
             {/* PUZZLE: why the file, or some of its chapters, did not load. */}
             {loadError && (
@@ -609,25 +799,6 @@ function PuzzlePracticePanel() {
                     ? "This file has no puzzle positions."
                     : "Loading puzzles from every chapter..."}
                 </Text>
-              </Alert>
-            )}
-            {syncMessage && (
-              <Alert
-                title={t("Board.Practice.DeckSynced")}
-                withCloseButton
-                onClose={() => setSyncMessage(null)}
-              >
-                {syncMessage.added > 0 &&
-                  t("Board.Practice.SyncAdded", {
-                    count: syncMessage.added ?? 0,
-                    number: formatNumber(syncMessage.added ?? 0),
-                  })}
-                {syncMessage.added > 0 && syncMessage.removed > 0 && " · "}
-                {syncMessage.removed > 0 &&
-                  t("Board.Practice.SyncRemoved", {
-                    count: syncMessage.removed ?? 0,
-                    number: formatNumber(syncMessage.removed ?? 0),
-                  })}
               </Alert>
             )}
             {stats.total > 0 && (
@@ -809,7 +980,9 @@ function PuzzlePracticePanel() {
 
                 {practiceState.phase === "waiting" && (
                   <Paper p="sm" withBorder>
-                    {practiceState.currentFen && currentFen !== practiceState.currentFen ? (
+                    {puzzle.status === "solving" &&
+                    expectedFen !== undefined &&
+                    currentFen !== expectedFen ? (
                       <Stack gap="xs" align="center">
                         <Text ta="center" fz="sm" c="dimmed">
                           {t("Board.Practice.NotOnPosition")}
@@ -820,62 +993,53 @@ function PuzzlePracticePanel() {
                           leftSection={<IconArrowBack size={14} />}
                           // PUZZLE: no setInvisible(true); pieces stay visible.
                           onClick={() => {
-                            goToMove(findFen(practiceState.currentFen!, root));
+                            goToMove([...puzzle.path, ...Array<number>(puzzle.step).fill(0)]);
                           }}
                         >
                           {t("Board.Practice.GoBackToPosition")}
                         </Button>
                       </Stack>
                     ) : (
-                      <Group gap="xs" justify="center">
-                        <Text ta="center" fz="sm" c="dimmed">
-                          {t("Board.Practice.MakeYourMove")}
+                      <Stack gap="xs" align="center">
+                        {/* PUZZLE: literal strings; see the i18n note in the plan's constraints.
+                            A miss says so without naming the right move. */}
+                        <Text ta="center" fz="sm" c={puzzle.missed ? "red" : "dimmed"}>
+                          {puzzle.status === "loading"
+                            ? t("Common.Loading")
+                            : puzzle.missed
+                              ? "Not that one, try again"
+                              : t("Board.Practice.MakeYourMove")}
                         </Text>
-                        <Button
-                          variant="light"
-                          size="compact-xs"
-                          color="red"
-                          onClick={() => {
-                            // PUZZLE: drop a card whose chapter is still loading, or the
-                            // load would restart the drill after Stop.
-                            pendingRef.current = null;
-                            setPracticeState({ phase: "idle" });
-                            setPracticePath(null);
-                            setInvisible(false);
-                            setShowComments(true);
-                            setEvalOpen(true);
-                            setSessionStats({
-                              mode: "anki",
-                              remainingPositions: [],
-                              correct: 0,
-                              incorrect: 0,
-                              streak: 0,
-                              bestStreak: 0,
-                            });
-                          }}
-                        >
-                          {t("Common.Stop")}
-                        </Button>
-                      </Group>
+                        <Group gap="xs" justify="center">
+                          <Button
+                            variant="light"
+                            size="compact-xs"
+                            disabled={puzzle.status === "loading"}
+                            onClick={showSolution}
+                          >
+                            Show solution
+                          </Button>
+                          <Button
+                            variant="light"
+                            size="compact-xs"
+                            color="red"
+                            onClick={stopPractice}
+                          >
+                            {t("Common.Stop")}
+                          </Button>
+                        </Group>
+                      </Stack>
                     )}
                   </Paper>
                 )}
 
-                {practiceState.phase === "correct" && sessionStats.mode !== "full" && (
+                {solvedClean && sessionStats.mode !== "full" && (
                   <>
-                    {/* PUZZLE: the solution node's comment, above the rating buttons. */}
-                    {answerComment && (
-                      <Paper p="xs" withBorder>
-                        <Comment comment={answerComment} />
-                      </Paper>
-                    )}
+                    {/* PUZZLE: every comment on the line, above the rating buttons. */}
+                    {commentsBox}
                     <QualityRatingPanel
                       onRate={handleQualityRating}
-                      card={
-                        practiceState.positionIndex !== undefined
-                          ? deck.positions[practiceState.positionIndex].card
-                          : undefined
-                      }
+                      card={deck.positions[0]?.card}
                       timeTaken={practiceState.timeTaken}
                     />
                   </>
@@ -883,37 +1047,35 @@ function PuzzlePracticePanel() {
 
                 {/* PUZZLE: full practice shows a correct panel only for a puzzle with a
                     comment, which never auto-advances; "Next puzzle" or Space moves on. */}
-                {practiceState.phase === "correct" &&
-                  sessionStats.mode === "full" &&
-                  !!answerComment && (
-                    <Paper p="sm" withBorder>
-                      <Stack gap="xs" align="center">
-                        <Group gap="xs">
-                          <ThemeIcon size="md" color="green" variant="light" radius="xl">
-                            <IconCheck size={16} />
-                          </ThemeIcon>
-                          <Text fw={500} c="green">
-                            {t("Board.Practice.Correct")}
+                {solvedClean && sessionStats.mode === "full" && puzzleComments.length > 0 && (
+                  <Paper p="sm" withBorder>
+                    <Stack gap="xs" align="center">
+                      <Group gap="xs">
+                        <ThemeIcon size="md" color="green" variant="light" radius="xl">
+                          <IconCheck size={16} />
+                        </ThemeIcon>
+                        <Text fw={500} c="green">
+                          {t("Board.Practice.Correct")}
+                        </Text>
+                        {practiceState.timeTaken !== undefined && (
+                          <Text fz="xs" c="dimmed">
+                            ({(practiceState.timeTaken / 1000).toFixed(1)}s)
                           </Text>
-                          {practiceState.timeTaken !== undefined && (
-                            <Text fz="xs" c="dimmed">
-                              ({(practiceState.timeTaken / 1000).toFixed(1)}s)
-                            </Text>
-                          )}
-                        </Group>
-                        <Paper p="xs" withBorder w="100%">
-                          <Comment comment={answerComment} />
-                        </Paper>
-                        <Button variant="light" size="sm" onClick={nextPuzzle}>
-                          {/* PUZZLE: literal string; see the i18n note in the plan's
-                              constraints. */}
-                          Next puzzle
-                        </Button>
-                      </Stack>
-                    </Paper>
-                  )}
+                        )}
+                      </Group>
+                      {commentsBox}
+                      <Button variant="light" size="sm" onClick={nextPuzzle}>
+                        {/* PUZZLE: literal string; see the i18n note in the plan's
+                            constraints. */}
+                        Next puzzle
+                      </Button>
+                    </Stack>
+                  </Paper>
+                )}
 
-                {practiceState.phase === "incorrect" && (
+                {/* PUZZLE: a miss or a revealed solution. Graded once when it ended; the
+                    board stays free to explore until the next puzzle reloads the chapter. */}
+                {puzzleFailed && (
                   <Paper p="sm" withBorder>
                     <Stack gap="xs" align="center">
                       <Group gap="xs">
@@ -921,25 +1083,20 @@ function PuzzlePracticePanel() {
                           <IconX size={16} />
                         </ThemeIcon>
                         <Text fw={500} c="red">
-                          {t("Common.Incorrect")}
+                          {/* PUZZLE: literal strings; see the i18n note in the plan's
+                              constraints. */}
+                          {puzzle.status === "revealed" ? "Solution shown" : "Missed"}
                         </Text>
                       </Group>
-                      <Text fz="sm" c="dimmed">
-                        {t("Board.Practice.CorrectMoveWas", {
-                          move: practiceState.answer,
-                        })}
-                      </Text>
-                      {/* PUZZLE: the solution node's comment explains what happened. A
-                          wrong move is never played (Board.tsx), so the board stays on
-                          the card node; answerComment reads it from the answer child. */}
-                      {answerComment && (
-                        <Paper p="xs" withBorder w="100%">
-                          <Comment comment={answerComment} />
-                        </Paper>
-                      )}
-                      <Button variant="light" size="sm" onClick={skipCard}>
-                        {t("Board.Practice.NextPosition")}
-                      </Button>
+                      {commentsBox}
+                      <Group gap="xs" justify="center">
+                        <Button variant="light" size="sm" onClick={nextAfterFailure}>
+                          Next puzzle
+                        </Button>
+                        <Button variant="subtle" size="sm" color="red" onClick={stopPractice}>
+                          {t("Common.Stop")}
+                        </Button>
+                      </Group>
                     </Stack>
                   </Paper>
                 )}
@@ -982,6 +1139,8 @@ function PuzzlePracticePanel() {
           }
           // PUZZLE: a card pending on a chapter load belongs to a deck just emptied.
           pendingRef.current = null;
+          clearTimers();
+          syncPuzzle("idle");
           setLoadError(null);
           setChaptersLoaded(false);
           setDecksVersion((v) => v + 1);
@@ -998,6 +1157,8 @@ function PuzzlePracticePanel() {
             streak: 0,
             bestStreak: 0,
           });
+          // PUZZLE: drop moves explored after the last puzzle.
+          void switchChapter(currentChapter);
           toggleResetModal();
         }}
         confirmLabel={t("Common.Reset")}
