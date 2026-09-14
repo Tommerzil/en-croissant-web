@@ -476,28 +476,34 @@ function Board({
                   </Box>
                 </Box>
               )}
-            <Box
-              h="100%"
-              style={{
-                width: 25,
-              }}
-            >
-              {!evalOpen && (
-                <Center h="100%" w="100%">
-                  <ActionIcon
-                    size="1rem"
-                    onClick={() => setEvalOpen(true)}
-                    onContextMenu={(e) => {
-                      setEvalOpen(true);
-                      e.preventDefault();
-                    }}
-                  >
-                    <IconChevronRight />
-                  </ActionIcon>
-                </Center>
-              )}
-              {evalOpen && <EvalBar score={currentNode.score || null} orientation={orientation} />}
-            </Box>
+            {/* On a phone a closed eval bar gives its column back to the board, which
+                is otherwise pushed off centre; the analysis tab reopens it. */}
+            {!(stacked && !evalOpen) && (
+              <Box
+                h="100%"
+                style={{
+                  width: 25,
+                }}
+              >
+                {!evalOpen && (
+                  <Center h="100%" w="100%">
+                    <ActionIcon
+                      size="1rem"
+                      onClick={() => setEvalOpen(true)}
+                      onContextMenu={(e) => {
+                        setEvalOpen(true);
+                        e.preventDefault();
+                      }}
+                    >
+                      <IconChevronRight />
+                    </ActionIcon>
+                  </Center>
+                )}
+                {evalOpen && (
+                  <EvalBar score={currentNode.score || null} orientation={orientation} />
+                )}
+              </Box>
+            )}
             <Box
               style={
                 isBasicAnnotation(visualAnnotation)

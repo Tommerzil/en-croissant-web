@@ -66,6 +66,12 @@
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
+  /* Scrolled by touch; a visible scrollbar only draws over the board's right edge. */
+  scrollbar-width: none;
+}
+
+.stacked::-webkit-scrollbar {
+  display: none;
 }
 
 /* Height is intentionally auto: .chessboard is `flex: 1; aspect-ratio: 1`, so the

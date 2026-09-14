@@ -1,4 +1,4 @@
-import { ActionIcon, Stack, Tooltip } from "@mantine/core";
+import { ActionIcon, Group, Stack, Tooltip } from "@mantine/core";
 import {
   IconArrowBack,
   IconCamera,
@@ -36,6 +36,8 @@ interface BoardControlsProps {
   onTakeBack?: () => void;
   disableVariations?: boolean;
   allowEditing?: boolean;
+  /** A row instead of a column; GameNotation sets it on phones. */
+  horizontal?: boolean;
 }
 
 function BoardControls({
@@ -47,6 +49,7 @@ function BoardControls({
   onTakeBack,
   disableVariations,
   allowEditing,
+  horizontal,
 }: BoardControlsProps) {
   const { t } = useTranslation();
   const { documentDir } = useLoaderData({ from: "/" });
@@ -106,22 +109,25 @@ function BoardControls({
     });
   };
 
+  const Container = horizontal ? Group : Stack;
+  const tooltipPosition = horizontal ? "bottom" : "right";
+
   return (
-    <Stack gap={4} align="center">
-      <Tooltip position="right" label={t("Board.Action.TakeSnapshot")}>
+    <Container gap={4} align="center" justify={horizontal ? "center" : undefined}>
+      <Tooltip position={tooltipPosition} label={t("Board.Action.TakeSnapshot")}>
         <ActionIcon onClick={() => takeSnapshot()}>
           <IconCamera size="1.2rem" />
         </ActionIcon>
       </Tooltip>
       {canTakeBack && onTakeBack && (
-        <Tooltip label="Take Back" position="right">
+        <Tooltip label="Take Back" position={tooltipPosition}>
           <ActionIcon onClick={() => onTakeBack()}>
             <IconArrowBack />
           </ActionIcon>
         </Tooltip>
       )}
       <Tooltip
-        position="right"
+        position={tooltipPosition}
         label={t(
           currentTab?.type === "analysis"
             ? "Board.Action.PlayFromHere"
@@ -137,14 +143,14 @@ function BoardControls({
         </ActionIcon>
       </Tooltip>
       {!eraseDrawablesOnClick && (
-        <Tooltip position="right" label={t("Board.Action.ClearDrawings")}>
+        <Tooltip position={tooltipPosition} label={t("Board.Action.ClearDrawings")}>
           <ActionIcon onClick={() => clearShapes()}>
             <IconEraser size="1.2rem" />
           </ActionIcon>
         </Tooltip>
       )}
       {(!disableVariations || allowEditing) && (
-        <Tooltip position="right" label={t("Board.Action.EditPosition")}>
+        <Tooltip position={tooltipPosition} label={t("Board.Action.EditPosition")}>
           <ActionIcon onClick={() => toggleEditingMode()}>
             {editingMode ? <IconEditOff size="1.2rem" /> : <IconEdit size="1.2rem" />}
           </ActionIcon>
@@ -152,7 +158,10 @@ function BoardControls({
       )}
 
       {saveFile && (
-        <Tooltip position="right" label={t("Board.Action.SavePGN", { key: keyMap.SAVE_FILE.keys })}>
+        <Tooltip
+          position={tooltipPosition}
+          label={t("Board.Action.SavePGN", { key: keyMap.SAVE_FILE.keys })}
+        >
           <ActionIcon
             onClick={() => saveFile()}
             variant={dirty && !autoSave ? "default" : "transparent"}
@@ -162,7 +171,7 @@ function BoardControls({
         </Tooltip>
       )}
       <Tooltip
-        position="right"
+        position={tooltipPosition}
         label={t("Board.Action.FlipBoard", {
           key: keyMap.SWAP_ORIENTATION.keys,
         })}
@@ -171,7 +180,7 @@ function BoardControls({
           <IconSwitchVertical size="1.2rem" />
         </ActionIcon>
       </Tooltip>
-    </Stack>
+    </Container>
   );
 }
 

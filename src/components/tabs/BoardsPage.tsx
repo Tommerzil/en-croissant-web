@@ -313,9 +313,11 @@ function BoardLayout({ children }: { children: ReactNode }) {
     <Fragment key={stacked ? "stacked" : "mosaic"}>
       {stacked ? (
         <div className={classes.stacked}>
+          {/* The panel sits right under the board: while practising, its prompt and
+              buttons are what the player needs, and the notation below can spoil. */}
           <div id="left" className={classes.stackedBoard} />
-          <div id="bottomRight" className={classes.stackedNotation} />
           <div id="topRight" className={classes.stackedPanel} />
+          <div id="bottomRight" className={classes.stackedNotation} />
         </div>
       ) : (
         <Mosaic<ViewId>

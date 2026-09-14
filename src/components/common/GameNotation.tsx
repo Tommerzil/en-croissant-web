@@ -11,7 +11,7 @@ import {
   Text,
   Tooltip,
 } from "@mantine/core";
-import { useColorScheme } from "@mantine/hooks";
+import { useColorScheme, useMediaQuery } from "@mantine/hooks";
 import {
   IconArrowRight,
   IconArrowsSplit,
@@ -37,8 +37,10 @@ import {
   currentInvisibleAtom,
   currentShowCommentsAtom,
   currentShowVariationsAtom,
+  puzzleMoveHandlerAtom,
   tableViewAtom,
 } from "@/state/atoms";
+import { STACKED_LAYOUT_QUERY } from "@/utils/breakpoints";
 import { keyMapAtom } from "@/state/keybinds";
 import { formatScore } from "@/utils/score";
 import { getNodeAtPath, type TreeNode } from "@/utils/treeReducer";
@@ -46,12 +48,29 @@ import CompleteMoveCell from "./CompleteMoveCell";
 import styles from "./GameNotation.module.css";
 import OpeningName from "./OpeningName";
 
+/**
+ * While a puzzle is being solved, the notation stops at the current move: the rest of
+ * the chapter's main line is the solution. The puzzle panel is mounted and a card is
+ * in play exactly when the handler is set and the practice path is. Returns the
+ * deepest path length to show, or Infinity when nothing is hidden.
+ */
+function useSolutionCutoff(): number {
+  const store = useContext(TreeStateContext)!;
+  const puzzleActive = useAtomValue(puzzleMoveHandlerAtom) !== null;
+  const cutoff = useStore(store, (s) => (s.practicePath ? s.position.length : Infinity));
+  return puzzleActive ? cutoff : Infinity;
+}
+
 function GameNotation({ topBar, controls }: { topBar?: boolean; controls?: React.ReactNode }) {
   const store = useContext(TreeStateContext)!;
   const currentFen = useStore(store, (s) => s.currentNode().fen);
   const copyPgn = useStore(store, (s) => s.copyPgn);
   const headers = useStore(store, (s) => s.headers);
   const rootComment = useStore(store, (s) => s.root.comment);
+  // On a phone the board controls are a row above the moves, not a column beside them.
+  const stacked = useMediaQuery(STACKED_LAYOUT_QUERY, false, {
+    getInitialValueInEffect: false,
+  });
 
   const viewport = useRef<HTMLDivElement>(null);
   const targetRef = useRef<HTMLSpanElement>(null);
@@ -88,7 +107,7 @@ function GameNotation({ topBar, controls }: { topBar?: boolean; controls?: React
   return (
     <Paper withBorder flex={1} style={{ position: "relative", overflow: "hidden" }}>
       <Group h="100%" wrap="nowrap" align="stretch" gap={0}>
-        {controls && (
+        {controls && !stacked && (
           <>
             <ScrollArea type="never" py="md" mx="xs" style={{ flexShrink: 0 }}>
               {controls}
@@ -97,6 +116,18 @@ function GameNotation({ topBar, controls }: { topBar?: boolean; controls?: React
           </>
         )}
         <Stack h="100%" gap={0} style={{ flex: 1, minWidth: 0 }}>
+          {controls && stacked && (
+            <>
+              <Box py={4}>
+                {React.isValidElement(controls)
+                  ? React.cloneElement(controls as React.ReactElement<{ horizontal?: boolean }>, {
+                      horizontal: true,
+                    })
+                  : controls}
+              </Box>
+              <Divider />
+            </>
+          )}
           {topBar && <NotationHeader />}
           <ScrollArea flex={1} offsetScrollbars scrollbars="y" viewportRef={viewport}>
             <Stack gap="xs">
@@ -201,6 +232,7 @@ const RenderVariationTree = memo(
     const showVariations = useAtomValue(currentShowVariationsAtom);
     const showComments = useAtomValue(currentShowCommentsAtom);
     const node = useStore(store, (s) => getNodeAtPath(s.root, nodePath));
+    const cutoff = useSolutionCutoff();
     const variations = node.children;
 
     const variationNodes = showVariations
@@ -227,6 +259,8 @@ const RenderVariationTree = memo(
       : [];
 
     const mainLinePath = [...nodePath, 0];
+    // A puzzle's solution is not shown until it has been played.
+    if (mainLinePath.length > cutoff) return null;
     return (
       <>
         {variations.length > 0 && (
@@ -287,6 +321,7 @@ const TableNotation = memo(function TableNotation({
   const showVariations = useAtomValue(currentShowVariationsAtom);
   const showComments = useAtomValue(currentShowCommentsAtom);
   const root = useStore(store, (s) => s.root);
+  const cutoff = useSolutionCutoff();
 
   const segments: Segment[] = [];
 
@@ -296,6 +331,8 @@ const TableNotation = memo(function TableNotation({
   while (current.children.length > 0) {
     const child = current.children[0];
     const childPath = [...path, 0];
+    // A puzzle's solution is not shown until it has been played.
+    if (childPath.length > cutoff) break;
     const isWhite = child.halfMoves % 2 === 1;
     const moveNum = Math.ceil(child.halfMoves / 2);
     const whiteVariations = current.children.slice(1);
@@ -311,7 +348,7 @@ const TableNotation = memo(function TableNotation({
       if (child.children.length > 0) {
         const blackChild = child.children[0];
         const bPath = [...childPath, 0];
-        if (blackChild.halfMoves % 2 === 0) {
+        if (blackChild.halfMoves % 2 === 0 && bPath.length <= cutoff) {
           blackNode = blackChild;
           blackPath = bPath;
           blackVariations = child.children.slice(1);

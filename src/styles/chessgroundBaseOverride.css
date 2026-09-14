@@ -146,6 +146,23 @@ piece.fading {
   flex-flow: column;
 }
 
+/* On a phone a square is ~45px, so 1rem labels sit on top of the pieces. Keep them
+   small in the corner, as the same query as the stacked board layout. */
+@media (max-width: 48em), (max-aspect-ratio: 1/1) {
+  .cg-wrap coords {
+    font-size: 0.6rem;
+    opacity: 0.85;
+  }
+
+  .cg-wrap coords.squares {
+    font-size: 0.55rem;
+  }
+
+  .cg-wrap coords.squares coord {
+    padding: 2% 3%;
+  }
+}
+
 .cg-wrap coords.squares.left {
   text-align: left;
 }

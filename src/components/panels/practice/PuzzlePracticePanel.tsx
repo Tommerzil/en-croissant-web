@@ -803,122 +803,8 @@ function PuzzlePracticePanel() {
             )}
             {stats.total > 0 && (
               <>
-                <Stack gap={4}>
-                  <Group justify="space-between">
-                    <Text fz="xs" fw={500}>
-                      {t("Board.Practice.Progress")}
-                    </Text>
-                    <Text fz="xs" c="dimmed">
-                      {Math.round((stats.practiced / stats.total) * 100)}%
-                    </Text>
-                  </Group>
-                  <Progress.Root size="sm">
-                    <Tooltip label={`${t("Board.Practice.Practiced")}: ${stats.practiced}`}>
-                      <Progress.Section
-                        value={(stats.practiced / stats.total) * 100}
-                        color="blue"
-                      />
-                    </Tooltip>
-                    <Tooltip label={`${t("Board.Practice.Due")}: ${stats.due}`}>
-                      <Progress.Section value={(stats.due / stats.total) * 100} color="yellow" />
-                    </Tooltip>
-                    <Tooltip label={`${t("Board.Practice.Unseen")}: ${stats.unseen}`}>
-                      <Progress.Section value={(stats.unseen / stats.total) * 100} color="gray" />
-                    </Tooltip>
-                  </Progress.Root>
-                </Stack>
-
-                <SimpleGrid cols={3} spacing="xs">
-                  <Paper p="xs" withBorder radius="sm">
-                    <Text fz={10} tt="uppercase" c="dimmed" fw={600}>
-                      {t("Board.Practice.Practiced")}
-                    </Text>
-                    <Text fz="lg" fw={700} c="blue">
-                      {stats.practiced}
-                    </Text>
-                  </Paper>
-                  <Paper p="xs" withBorder radius="sm">
-                    <Text fz={10} tt="uppercase" c="dimmed" fw={600}>
-                      {t("Board.Practice.Due")}
-                    </Text>
-                    <Text fz="lg" fw={700} c="yellow">
-                      {stats.due}
-                    </Text>
-                  </Paper>
-                  <Paper p="xs" withBorder radius="sm">
-                    <Text fz={10} tt="uppercase" c="dimmed" fw={600}>
-                      {t("Board.Practice.Unseen")}
-                    </Text>
-                    <Text fz="lg" fw={700} c="dimmed">
-                      {stats.unseen}
-                    </Text>
-                  </Paper>
-                </SimpleGrid>
-
-                {(practiceState.phase !== "idle" ||
-                  sessionStats.correct > 0 ||
-                  sessionStats.incorrect > 0) && (
-                  <SimpleGrid cols={3} spacing="xs">
-                    <Paper p="xs" withBorder radius="sm">
-                      <Group gap={4} wrap="nowrap">
-                        <ThemeIcon size="xs" color="green" variant="transparent">
-                          <IconCheck size={12} />
-                        </ThemeIcon>
-                        <Text fz={10} tt="uppercase" c="dimmed" fw={600}>
-                          {t("Board.Practice.SessionCorrect")}
-                        </Text>
-                      </Group>
-                      <Text fz="lg" fw={700} c="green">
-                        {sessionStats.correct}
-                      </Text>
-                    </Paper>
-                    <Paper p="xs" withBorder radius="sm">
-                      <Group gap={4} wrap="nowrap">
-                        <ThemeIcon size="xs" color="red" variant="transparent">
-                          <IconX size={12} />
-                        </ThemeIcon>
-                        <Text fz={10} tt="uppercase" c="dimmed" fw={600}>
-                          {t("Board.Practice.SessionIncorrect")}
-                        </Text>
-                      </Group>
-                      <Text fz="lg" fw={700} c="red">
-                        {sessionStats.incorrect}
-                      </Text>
-                    </Paper>
-                    <Paper p="xs" withBorder radius="sm">
-                      <Group gap={4} wrap="nowrap">
-                        {sessionStats.correct + sessionStats.incorrect > 0 ? (
-                          <ThemeIcon size="xs" color="teal" variant="transparent">
-                            <IconTarget size={12} />
-                          </ThemeIcon>
-                        ) : (
-                          <ThemeIcon size="xs" color="orange" variant="transparent">
-                            <IconFlame size={12} />
-                          </ThemeIcon>
-                        )}
-                        <Text fz={10} tt="uppercase" c="dimmed" fw={600}>
-                          {sessionStats.correct + sessionStats.incorrect > 0
-                            ? t("Board.Practice.Accuracy")
-                            : t("Board.Practice.Streak")}
-                        </Text>
-                      </Group>
-                      <Text
-                        fz="lg"
-                        fw={700}
-                        c={sessionStats.correct + sessionStats.incorrect > 0 ? "teal" : "orange"}
-                      >
-                        {sessionStats.correct + sessionStats.incorrect > 0
-                          ? `${Math.round(
-                              (sessionStats.correct /
-                                (sessionStats.correct + sessionStats.incorrect)) *
-                                100,
-                            )}%`
-                          : sessionStats.streak}
-                      </Text>
-                    </Paper>
-                  </SimpleGrid>
-                )}
-
+                {/* PUZZLE: the prompt and its buttons come first; on a phone the
+                    stats would otherwise push them below the fold. */}
                 {practiceState.phase === "idle" && (
                   <Stack gap="sm">
                     {stats.due === 0 && stats.unseen === 0 ? (
@@ -1099,6 +985,122 @@ function PuzzlePracticePanel() {
                       </Group>
                     </Stack>
                   </Paper>
+                )}
+
+                <Stack gap={4}>
+                  <Group justify="space-between">
+                    <Text fz="xs" fw={500}>
+                      {t("Board.Practice.Progress")}
+                    </Text>
+                    <Text fz="xs" c="dimmed">
+                      {Math.round((stats.practiced / stats.total) * 100)}%
+                    </Text>
+                  </Group>
+                  <Progress.Root size="sm">
+                    <Tooltip label={`${t("Board.Practice.Practiced")}: ${stats.practiced}`}>
+                      <Progress.Section
+                        value={(stats.practiced / stats.total) * 100}
+                        color="blue"
+                      />
+                    </Tooltip>
+                    <Tooltip label={`${t("Board.Practice.Due")}: ${stats.due}`}>
+                      <Progress.Section value={(stats.due / stats.total) * 100} color="yellow" />
+                    </Tooltip>
+                    <Tooltip label={`${t("Board.Practice.Unseen")}: ${stats.unseen}`}>
+                      <Progress.Section value={(stats.unseen / stats.total) * 100} color="gray" />
+                    </Tooltip>
+                  </Progress.Root>
+                </Stack>
+
+                <SimpleGrid cols={3} spacing="xs">
+                  <Paper p="xs" withBorder radius="sm">
+                    <Text fz={10} tt="uppercase" c="dimmed" fw={600}>
+                      {t("Board.Practice.Practiced")}
+                    </Text>
+                    <Text fz="lg" fw={700} c="blue">
+                      {stats.practiced}
+                    </Text>
+                  </Paper>
+                  <Paper p="xs" withBorder radius="sm">
+                    <Text fz={10} tt="uppercase" c="dimmed" fw={600}>
+                      {t("Board.Practice.Due")}
+                    </Text>
+                    <Text fz="lg" fw={700} c="yellow">
+                      {stats.due}
+                    </Text>
+                  </Paper>
+                  <Paper p="xs" withBorder radius="sm">
+                    <Text fz={10} tt="uppercase" c="dimmed" fw={600}>
+                      {t("Board.Practice.Unseen")}
+                    </Text>
+                    <Text fz="lg" fw={700} c="dimmed">
+                      {stats.unseen}
+                    </Text>
+                  </Paper>
+                </SimpleGrid>
+
+                {(practiceState.phase !== "idle" ||
+                  sessionStats.correct > 0 ||
+                  sessionStats.incorrect > 0) && (
+                  <SimpleGrid cols={3} spacing="xs">
+                    <Paper p="xs" withBorder radius="sm">
+                      <Group gap={4} wrap="nowrap">
+                        <ThemeIcon size="xs" color="green" variant="transparent">
+                          <IconCheck size={12} />
+                        </ThemeIcon>
+                        <Text fz={10} tt="uppercase" c="dimmed" fw={600}>
+                          {t("Board.Practice.SessionCorrect")}
+                        </Text>
+                      </Group>
+                      <Text fz="lg" fw={700} c="green">
+                        {sessionStats.correct}
+                      </Text>
+                    </Paper>
+                    <Paper p="xs" withBorder radius="sm">
+                      <Group gap={4} wrap="nowrap">
+                        <ThemeIcon size="xs" color="red" variant="transparent">
+                          <IconX size={12} />
+                        </ThemeIcon>
+                        <Text fz={10} tt="uppercase" c="dimmed" fw={600}>
+                          {t("Board.Practice.SessionIncorrect")}
+                        </Text>
+                      </Group>
+                      <Text fz="lg" fw={700} c="red">
+                        {sessionStats.incorrect}
+                      </Text>
+                    </Paper>
+                    <Paper p="xs" withBorder radius="sm">
+                      <Group gap={4} wrap="nowrap">
+                        {sessionStats.correct + sessionStats.incorrect > 0 ? (
+                          <ThemeIcon size="xs" color="teal" variant="transparent">
+                            <IconTarget size={12} />
+                          </ThemeIcon>
+                        ) : (
+                          <ThemeIcon size="xs" color="orange" variant="transparent">
+                            <IconFlame size={12} />
+                          </ThemeIcon>
+                        )}
+                        <Text fz={10} tt="uppercase" c="dimmed" fw={600}>
+                          {sessionStats.correct + sessionStats.incorrect > 0
+                            ? t("Board.Practice.Accuracy")
+                            : t("Board.Practice.Streak")}
+                        </Text>
+                      </Group>
+                      <Text
+                        fz="lg"
+                        fw={700}
+                        c={sessionStats.correct + sessionStats.incorrect > 0 ? "teal" : "orange"}
+                      >
+                        {sessionStats.correct + sessionStats.incorrect > 0
+                          ? `${Math.round(
+                              (sessionStats.correct /
+                                (sessionStats.correct + sessionStats.incorrect)) *
+                                100,
+                            )}%`
+                          : sessionStats.streak}
+                      </Text>
+                    </Paper>
+                  </SimpleGrid>
                 )}
 
                 <Divider />
