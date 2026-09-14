@@ -709,6 +709,19 @@ function PuzzlePracticePanel() {
     newPractice(stats);
   }
 
+  // PUZZLE: opening a puzzle file starts the drill, once per mount. Before a drill the
+  // board is free for both colours and never flips, which reads as a broken puzzle;
+  // Stop still returns to that free board and does not restart it.
+  const autoStartedRef = useRef(false);
+  const startPracticeRef = useRef(startPractice);
+  startPracticeRef.current = startPractice;
+  useEffect(() => {
+    if (autoStartedRef.current || !chaptersLoaded || loadError) return;
+    if (practiceState.phase !== "idle" || stats.due + stats.unseen === 0) return;
+    autoStartedRef.current = true;
+    startPracticeRef.current();
+  }, [chaptersLoaded, loadError, practiceState.phase, stats.due, stats.unseen]);
+
   function startFullPractice() {
     // PUZZLE: indices into the whole file's card order, not the open chapter's deck.
     const indices = fullOrder(flattenDecks(readAllDecks())).map((_, i) => i);
