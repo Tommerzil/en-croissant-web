@@ -95,6 +95,8 @@
 .input {
   min-width: 0;
   max-width: 100%;
+  /* An input cannot wrap; on a phone a long event or site is cut off, so say so. */
+  text-overflow: ellipsis;
   padding: 2px 0;
   border: 0;
   border-radius: var(--mantine-radius-xs);

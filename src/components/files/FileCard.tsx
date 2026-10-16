@@ -31,6 +31,7 @@ function FileCard({
   const navigate = useNavigate();
 
   const [selectedGame, setSelectedGame] = useState<string | null>(null);
+  const isPuzzle = selected.metadata.type === "puzzle";
   const [page, setPage] = useState(0);
 
   useEffect(() => {
@@ -98,7 +99,13 @@ function FileCard({
             <Divider />
           </Box>
           <Box h="55%" px="xs" pb="xs">
-            <GamePreview pgn={selectedGame} />
+            {/* PUZZLE: a puzzle chapter previews as the position to solve, after the
+                lead-in move. Its moves and comments are the answer, so they stay hidden. */}
+            <GamePreview
+              pgn={selectedGame}
+              hideControls={isPuzzle}
+              startAtPly={isPuzzle ? 1 : undefined}
+            />
           </Box>
         </>
       )}

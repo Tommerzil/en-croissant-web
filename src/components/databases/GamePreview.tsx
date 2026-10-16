@@ -17,12 +17,15 @@ function GamePreviewWrapper({
   hideControls,
   showOpening,
   startAtEnd,
+  startAtPly,
 }: {
   pgn: string;
   headers?: GameHeaders;
   hideControls?: boolean;
   showOpening?: boolean;
   startAtEnd?: boolean;
+  /** Open the preview this many mainline half-moves in, instead of at the start. */
+  startAtPly?: number;
 }) {
   const { data: parsedGame } = useSWRImmutable([pgn, headers?.fen], async ([pgn, fen]) => {
     return await parsePGN(pgn, fen);
@@ -37,6 +40,7 @@ function GamePreviewWrapper({
           hideControls={hideControls}
           showOpening={showOpening}
           startAtEnd={startAtEnd}
+          startAtPly={startAtPly}
         />
       )}
     </>
@@ -48,17 +52,20 @@ function GamePreview({
   hideControls,
   showOpening,
   startAtEnd,
+  startAtPly,
 }: {
   game: TreeState;
   hideControls?: boolean;
   showOpening?: boolean;
   startAtEnd?: boolean;
+  startAtPly?: number;
 }) {
   const { ref: boardRef, height } = useElementSize();
-  const initialGame = useMemo(
-    () => (startAtEnd ? { ...game, position: Array(countMainPly(game.root)).fill(0) } : game),
-    [game, startAtEnd],
-  );
+  const initialGame = useMemo(() => {
+    const mainPly = countMainPly(game.root);
+    const ply = startAtEnd ? mainPly : Math.min(startAtPly ?? 0, mainPly);
+    return ply > 0 ? { ...game, position: Array(ply).fill(0) } : game;
+  }, [game, startAtEnd, startAtPly]);
 
   return (
     <TreeStateProvider initial={initialGame}>
