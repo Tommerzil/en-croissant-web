@@ -19,20 +19,15 @@ import {
   IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
-import { basename } from "@tauri-apps/api/path";
-import { resolve } from "@tauri-apps/api/path";
-import { info } from "@tauri-apps/plugin-log";
 import { useAtom } from "jotai";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DatabaseInfo } from "@/bindings";
-import { commands, events } from "@/bindings";
-import { databaseConversionStateAtom, storedDatabasesDirAtom } from "@/state/atoms";
-import { downloadChessCom } from "@/utils/chess.com/api";
-import { getDatabases, query_games } from "@/utils/db";
+import { events } from "@/bindings";
+import { storedDatabasesDirAtom } from "@/state/atoms";
+import { syncAccountGames } from "@/utils/accountSync";
+import { getDatabases } from "@/utils/db";
 import { capitalize } from "@/utils/format";
-import { downloadLichess } from "@/utils/lichess/api";
-import { unwrap } from "@/utils/unwrap";
 import LichessLogo from "./LichessLogo";
 
 interface AccountCardProps {
@@ -99,41 +94,6 @@ export function AccountCard({
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [databaseDir] = useAtom(storedDatabasesDirAtom);
-  const [, setConversionState] = useAtom(databaseConversionStateAtom);
-
-  async function convert(filepath: string, timestamp: number | null) {
-    info(`converting ${filepath} ${timestamp}`);
-    const filename = title + (type === "lichess" ? " Lichess" : " Chess.com");
-    const dbPath = await resolve(
-      databaseDir,
-      `${filepath
-        .split(/(\\|\/)/g)
-        .pop()
-        ?.replace(".pgn", ".db3")}`,
-    );
-    const sourceFileName = await basename(filepath);
-    setConversionState((prev) => ({
-      ...prev,
-      inProgress: true,
-      targetDatabasePath: dbPath,
-      targetDatabaseTitle: filename,
-      sourceFileName,
-    }));
-    unwrap(
-      await commands.convertPgn(
-        [filepath],
-        dbPath,
-        timestamp ? timestamp / 1000 : null,
-        filename,
-        null,
-      ),
-    );
-    events.progressEvent.emit({
-      id: `${type}_${title}`,
-      progress: 100,
-      finished: true,
-    });
-  }
 
   useEffect(() => {
     const unlisten = events.progressEvent.listen(async (e) => {
@@ -156,25 +116,6 @@ export function AccountCard({
   const effectiveTotal = Math.max(total, downloadedGames);
   const percentage =
     effectiveTotal === 0 ? "0.00" : ((downloadedGames / effectiveTotal) * 100).toFixed(2);
-
-  async function getLastGameDate({ database }: { database: DatabaseInfo }) {
-    const games = await query_games(database.file, {
-      options: {
-        page: 1,
-        pageSize: 1,
-        sort: "date",
-        direction: "desc",
-        skipCount: false,
-      },
-    });
-    if (games.count! > 0 && games.data[0].date && games.data[0].time) {
-      const [year, month, day] = games.data[0].date.split(".").map(Number);
-      const [hour, minute, second] = games.data[0].time.split(":").map(Number);
-      const d = Date.UTC(year, month - 1, day, hour, minute, second);
-      return d;
-    }
-    return null;
-  }
 
   return (
     <Card withBorder radius="md" padding="lg">
@@ -211,36 +152,15 @@ export function AccountCard({
                 disabled={loading}
                 onClick={async () => {
                   setLoading(true);
-                  const lastGameDate = database ? await getLastGameDate({ database }) : null;
-                  if (type === "lichess") {
-                    await downloadLichess(
-                      title,
-                      lastGameDate,
-                      total - downloadedGames,
-                      setProgress,
-                      token,
-                    );
-                  } else {
-                    await downloadChessCom(title, lastGameDate);
-                  }
-                  const p = await resolve(databaseDir, `${title}_${type}.pgn`);
-                  try {
-                    await convert(p, lastGameDate);
-                    const dbPath = p.replace(".pgn", ".db3");
-                    await commands.deleteEmptyGames(dbPath);
-                  } catch (e) {
-                    console.error(e);
-                  } finally {
-                    setConversionState((prev) => ({
-                      ...prev,
-                      inProgress: false,
-                      totalGames: 0,
-                      elapsedSeconds: 0,
-                      targetDatabasePath: null,
-                      targetDatabaseTitle: null,
-                      sourceFileName: null,
-                    }));
-                  }
+                  await syncAccountGames({
+                    type,
+                    username: title,
+                    token,
+                    total,
+                    database,
+                    databaseDir,
+                    setProgress,
+                  });
                   setLoading(false);
                 }}
               >

@@ -13,8 +13,8 @@ import { useAtom, useAtomValue } from "jotai";
 import { useEffect, useRef, useState } from "react";
 import type { DatabaseInfo } from "@/bindings";
 import { sessionsAtom } from "@/state/atoms";
-import { getChessComAccount, getStats } from "@/utils/chess.com/api";
-import { getLichessAccount } from "@/utils/lichess/api";
+import { refreshSession, sameAccount } from "@/utils/accountSync";
+import { getStats } from "@/utils/chess.com/api";
 import type { Session } from "@/utils/session";
 import { AccountCard } from "../home/AccountCard";
 import { EmptyAccounts } from "../home/EmptyAccounts";
@@ -184,6 +184,12 @@ function LichessOrChessCom({
   setDatabases: React.Dispatch<React.SetStateAction<DatabaseInfo[]>>;
   setSessions: React.Dispatch<React.SetStateAction<Session[]>>;
 }) {
+  async function reload(stale: Session) {
+    const fresh = await refreshSession(stale);
+    if (!fresh) return;
+    setSessions((sessions) => sessions.map((s) => (sameAccount(s, fresh) ? fresh : s)));
+  }
+
   if (session.lichess?.account) {
     const account = session.lichess.account;
     const lichessSession = session.lichess;
@@ -224,28 +230,7 @@ function LichessOrChessCom({
           setSessions((sessions) => sessions.filter((s) => s.lichess?.account.id !== account.id));
         }}
         setDatabases={setDatabases}
-        reload={async () => {
-          const account = await getLichessAccount({
-            token: lichessSession.accessToken,
-            username: lichessSession.username,
-          });
-          if (!account) return;
-          setSessions((sessions) =>
-            sessions.map((s) =>
-              s.lichess?.account.id === account.id
-                ? {
-                    ...s,
-                    lichess: {
-                      account: account,
-                      username: lichessSession.username,
-                      accessToken: lichessSession.accessToken,
-                    },
-                    updatedAt: Date.now(),
-                  }
-                : s,
-            ),
-          );
-        }}
+        reload={() => reload(session)}
         stats={stats}
       />
     );
@@ -274,25 +259,7 @@ function LichessOrChessCom({
             sessions.filter((s) => s.chessCom?.username !== session.chessCom?.username),
           );
         }}
-        reload={async () => {
-          if (!session.chessCom) return;
-          const stats = await getChessComAccount(session.chessCom?.username);
-          if (!stats) return;
-          setSessions((sessions) =>
-            sessions.map((s) =>
-              session.chessCom && s.chessCom?.username === session.chessCom?.username
-                ? {
-                    ...s,
-                    chessCom: {
-                      username: session.chessCom?.username,
-                      stats,
-                    },
-                    updatedAt: Date.now(),
-                  }
-                : s,
-            ),
-          );
-        }}
+        reload={() => reload(session)}
         setDatabases={setDatabases}
       />
     );

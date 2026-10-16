@@ -17,4 +17,6 @@ export type Session = {
     chessCom?: ChessComSession;
     player?: string;
     updatedAt: number;
+    /** When the games were last pulled in automatically at app start. */
+    syncedAt?: number;
 };

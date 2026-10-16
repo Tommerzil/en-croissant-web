@@ -64,6 +64,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import ErrorComponent from "@/components/ErrorComponent";
+import { autoSyncAccounts } from "@/utils/accountSync";
 import { getDatabasesDir, getDocumentDir, getEnginesDir, getPuzzlesDir } from "@/utils/directories";
 import { initUserAgent } from "@/utils/http";
 import { routeTree } from "./routeTree.gen";
@@ -198,6 +199,8 @@ function useAppStartup() {
       }
 
       await preloadReferenceDb(store);
+      // Not awaited: pulling in new games must not hold up the first screen.
+      void autoSyncAccounts(store);
 
       let unlistenDeepLink: (() => void) | undefined;
       try {

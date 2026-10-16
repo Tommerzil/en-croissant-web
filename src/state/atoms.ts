@@ -211,7 +211,10 @@ export const pieceSetAtom = atomWithStorage<string>("piece-set", "staunty");
 export const boardImageAtom = atomWithStorage<string>("board-image", "gray.svg");
 export const is3dAtom = atomWithStorage<boolean>("is-3d", false);
 export const primaryColorAtom = atomWithStorage<MantineColor>("mantine-primary-color", "blue");
-export const sessionsAtom = atomWithStorage<Session[]>("sessions", []);
+// Read at app start by autoSyncAccounts before any component has subscribed.
+export const sessionsAtom = atomWithStorage<Session[]>("sessions", [], undefined, {
+    getOnInit: true,
+});
 export const nativeBarAtom = atomWithStorage<boolean>("native-bar", false);
 export const telemetryEnabledAtom = atomWithStorage<boolean>("telemetry-enabled", true, undefined, {
     getOnInit: true,
