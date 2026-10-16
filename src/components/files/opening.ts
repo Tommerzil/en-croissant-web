@@ -102,10 +102,18 @@ export function updateCardPerformance(
     i: number,
     card: Card,
     grade: 1 | 2 | 3 | 4,
+    options: { minDelayMs?: number; now?: Date } = {},
 ) {
-    const schedulingCards = f.repeat(card, new Date());
+    const now = options.now ?? new Date();
+    const schedulingCards = f.repeat(card, now);
 
     const { card: newCard, log } = schedulingCards[grade];
+    // The scheduler's shortest step is one minute, which is too soon for a puzzle: the
+    // position is still in working memory. A caller may ask for a longer floor.
+    if (options.minDelayMs !== undefined) {
+        const floor = new Date(now.getTime() + options.minDelayMs);
+        if (newCard.due < floor) newCard.due = floor;
+    }
 
     setPositions((data) => {
         data.positions[i].card = newCard;

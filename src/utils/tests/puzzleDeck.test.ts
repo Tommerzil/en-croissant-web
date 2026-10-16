@@ -1,11 +1,13 @@
 import { createEmptyCard } from "ts-fsrs";
 import { describe, expect, it } from "vitest";
-import { type Position, positionSchema } from "@/components/files/opening";
+import { type Position, positionSchema, updateCardPerformance } from "@/components/files/opening";
+import type { PracticeData } from "@/state/atoms";
 import {
     buildPuzzleCard,
     flattenDecks,
     fullOrder,
     nextDueCard,
+    PUZZLE_MIN_DELAY_MS,
     puzzleMoveDecision,
     reconcilePuzzleDeck,
     sumStats,
@@ -207,5 +209,34 @@ describe("puzzleMoveDecision", () => {
         expect(puzzleMoveDecision(line, 0, "idle", "Kh7")).toBe("free");
         expect(puzzleMoveDecision(line, 3, "solved", "Kh7")).toBe("free");
         expect(puzzleMoveDecision(line, 1, "revealed", "Kh7")).toBe("free");
+    });
+});
+
+describe("updateCardPerformance with a relearn floor", () => {
+    function grade(grade: 1 | 2 | 3 | 4, minDelayMs?: number): Date {
+        let data: PracticeData = { positions: [pos("fen", T0)], logs: [] };
+        updateCardPerformance(
+            (update) => {
+                data = typeof update === "function" ? update(data) : update;
+            },
+            0,
+            data.positions[0].card,
+            grade,
+            { minDelayMs, now: T0 },
+        );
+        return new Date(data.positions[0].card.due);
+    }
+
+    it("the scheduler alone brings a missed new card back within a minute", () => {
+        expect(grade(1).getTime() - T0.getTime()).toBeLessThanOrEqual(60_000);
+    });
+
+    it("a missed puzzle comes back no sooner than the floor", () => {
+        expect(grade(1, PUZZLE_MIN_DELAY_MS).getTime()).toBe(T0.getTime() + PUZZLE_MIN_DELAY_MS);
+    });
+
+    it("the floor never shortens a longer interval", () => {
+        const good = grade(3);
+        expect(grade(3, 1000).getTime()).toBe(good.getTime());
     });
 });

@@ -51,6 +51,7 @@ import {
   flattenDecks,
   fullOrder,
   nextDueCard,
+  PUZZLE_MIN_DELAY_MS,
   type PuzzleStatus,
   puzzleMoveDecision,
   reconcilePuzzleDeck,
@@ -257,6 +258,7 @@ function PuzzlePracticePanel() {
     step: number;
     path: number[];
   }>({ status: "idle", missed: false, step: 0, path: [] });
+  const trainPanelRef = useRef<HTMLDivElement>(null);
 
   const syncPuzzle = useCallback((status: PuzzleStatus) => {
     statusRef.current = status;
@@ -442,6 +444,8 @@ function PuzzlePracticePanel() {
 
       pendingRef.current = { ...target, loaded: false };
       syncPuzzle("loading");
+      // PUZZLE: the previous puzzle's comments may have left the panel scrolled down.
+      trainPanelRef.current?.scrollTo({ top: 0 });
       // PUZZLE: leave "correct" now, or the auto-advance effect re-arms its 300ms timer
       // (and the rating hotkeys stay live) for as long as the chapter takes to load.
       setPracticeState({ phase: "waiting", currentFen: target.fen });
@@ -487,7 +491,9 @@ function PuzzlePracticePanel() {
         const stored = getDefaultStore().get(
           deckAtomFamily({ file: tabFile.path, game: currentChapter }),
         ).positions[0];
-        if (stored) updateCardPerformance(setDeck, 0, stored.card, 1);
+        if (stored) {
+          updateCardPerformance(setDeck, 0, stored.card, 1, { minDelayMs: PUZZLE_MIN_DELAY_MS });
+        }
       }
     },
     [
@@ -628,7 +634,9 @@ function PuzzlePracticePanel() {
           const card = deck.positions[positionIndex].card;
           const grade = Number(practiceAutoDifficulty) as 1 | 2 | 3 | 4;
 
-          updateCardPerformance(setDeck, positionIndex, card, grade);
+          updateCardPerformance(setDeck, positionIndex, card, grade, {
+            minDelayMs: PUZZLE_MIN_DELAY_MS,
+          });
           setSessionStats((prev) => ({
             ...prev,
             correct: prev.correct + 1,
@@ -686,7 +694,7 @@ function PuzzlePracticePanel() {
     const { positionIndex } = practiceState;
     const card = deck.positions[positionIndex].card;
 
-    updateCardPerformance(setDeck, positionIndex, card, grade);
+    updateCardPerformance(setDeck, positionIndex, card, grade, { minDelayMs: PUZZLE_MIN_DELAY_MS });
     setSessionStats((prev) => ({
       ...prev,
       correct: prev.correct + 1,
@@ -796,7 +804,7 @@ function PuzzlePracticePanel() {
         </Tabs.List>
 
         {/* PUZZLE: scrolls, because a chain's comments push "Next puzzle" below the fold. */}
-        <Tabs.Panel value="train" style={{ overflow: "auto" }}>
+        <Tabs.Panel value="train" ref={trainPanelRef} style={{ overflow: "auto" }}>
           <Stack p="sm" gap="md">
             {/* PUZZLE: why the file, or some of its chapters, did not load. */}
             {loadError && (

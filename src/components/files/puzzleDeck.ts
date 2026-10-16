@@ -11,6 +11,9 @@ import type { PracticeData } from "@/state/atoms";
 import type { TreeNode } from "@/utils/treeReducer";
 import { getStats, type Position } from "./opening";
 
+/** A graded puzzle comes back no sooner than this, whatever the scheduler says. */
+export const PUZZLE_MIN_DELAY_MS = 10 * 60 * 1000;
+
 export type ChapterCard = {
     chapter: number;
     index: number;
