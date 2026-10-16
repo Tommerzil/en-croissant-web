@@ -437,11 +437,12 @@ pub async fn make_game_move(State(app): State<App>, Json(args): Json<MakeGameMov
 #[serde(rename_all = "camelCase")]
 pub struct TakeBackGameMoveArgs {
     pub game_id: String,
+    pub ply: Option<u32>,
 }
 
 pub async fn take_back_game_move(State(app): State<App>, Json(args): Json<TakeBackGameMoveArgs>) -> ApiResult {
     app.refresh_game(&args.game_id);
-    let out = en_croissant::game::take_back_game_move(args.game_id, app.ctx.clone(), &*app.ctx.state).await?;
+    let out = en_croissant::game::take_back_game_move(args.game_id, args.ply, app.ctx.clone(), &*app.ctx.state).await?;
     Ok(Json(serde_json::to_value(out)?))
 }
 

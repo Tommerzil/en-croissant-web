@@ -33,6 +33,7 @@ import {
   enableBoardScrollAtom,
   eraseDrawablesOnClickAtom,
   forcedEnPassantAtom,
+  is3dAtom,
   materialDisplayAtom,
   moveHighlightAtom,
   moveInputAtom,
@@ -101,6 +102,8 @@ function Board({
   enablePremoves = false,
 }: ChessboardProps) {
   const { t } = useTranslation();
+
+  const is3d = useAtomValue(is3dAtom);
 
   const store = useContext(TreeStateContext)!;
 
@@ -513,7 +516,7 @@ function Board({
                     }
                   : undefined
               }
-              className={classes.chessboard}
+              className={`${classes.chessboard} ${is3d ? "is3d" : ""}`}
               ref={boardRef}
               onClick={() => {
                 eraseDrawablesOnClick && clearShapes();

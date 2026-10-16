@@ -407,6 +407,38 @@ impl GameController {
         Ok(game_move)
     }
 
+    fn take_back_move(&mut self, ply: Option<usize>) -> Result<(), Error> {
+        if self.moves.is_empty() {
+            return Err(Error::NoMovesFound);
+        }
+
+        if let Some(ply) = ply {
+            if ply >= self.moves.len() {
+                return Err(Error::NoMovesFound);
+            }
+            self.moves.truncate(ply);
+        } else {
+            let human_color = match (&self.config.white, &self.config.black) {
+                (PlayerConfig::Human { .. }, PlayerConfig::Engine { .. }) => Some(Color::White),
+                (PlayerConfig::Engine { .. }, PlayerConfig::Human { .. }) => Some(Color::Black),
+                _ => None,
+            };
+            let should_pop_two = human_color
+                .map(|c| self.position.turn() == c)
+                .unwrap_or(false);
+            self.moves.pop();
+            if should_pop_two {
+                self.moves.pop();
+            }
+        }
+
+        self.status = GameStatus::Playing;
+        self.engine_thinking = false;
+        self.rebuild_position_from_moves()?;
+        self.check_game_end();
+        Ok(())
+    }
+
     fn rebuild_position_from_moves(&mut self) -> Result<(), Error> {
         self.position = parse_fen_to_position(&self.initial_fen)?;
 
@@ -731,7 +763,12 @@ impl GameManager {
         Ok(controller.get_state())
     }
 
-    pub async fn take_back_move(&self, game_id: &str, app: &AppCtx) -> Result<GameState, Error> {
+    pub async fn take_back_move(
+        &self,
+        game_id: &str,
+        ply: Option<usize>,
+        app: &AppCtx,
+    ) -> Result<GameState, Error> {
         let game = self
             .games
             .get(game_id)
@@ -739,29 +776,7 @@ impl GameManager {
 
         let mut controller = game.write().await;
 
-        if controller.moves.is_empty() {
-            return Err(Error::NoMovesFound);
-        }
-
-        let human_color = match (&controller.config.white, &controller.config.black) {
-            (PlayerConfig::Human { .. }, PlayerConfig::Engine { .. }) => Some(Color::White),
-            (PlayerConfig::Engine { .. }, PlayerConfig::Human { .. }) => Some(Color::Black),
-            _ => None,
-        };
-
-        let should_pop_two = human_color
-            .map(|c| controller.position.turn() == c)
-            .unwrap_or(false);
-
-        controller.moves.pop();
-        if should_pop_two {
-            controller.moves.pop();
-        }
-        controller.status = GameStatus::Playing;
-        controller.engine_thinking = false;
-
-        controller.rebuild_position_from_moves()?;
-        controller.check_game_end();
+        controller.take_back_move(ply)?;
 
         let (white_time, black_time) = controller.get_current_times();
         let fen = Fen::from_position(controller.position.clone(), EnPassantMode::Legal).to_string();
@@ -1595,10 +1610,14 @@ pub async fn make_game_move(
 #[cfg_attr(feature = "tauri", specta::specta)]
 pub async fn take_back_game_move(
     game_id: String,
+    ply: Option<u32>,
     app: AppCtx,
     state: AppStateRef<'_>,
 ) -> Result<GameState, Error> {
-    state.game_manager.take_back_move(&game_id, &app).await
+    state
+        .game_manager
+        .take_back_move(&game_id, ply.map(|ply| ply as usize), &app)
+        .await
 }
 
 #[cfg_attr(feature = "tauri", tauri::command)]
